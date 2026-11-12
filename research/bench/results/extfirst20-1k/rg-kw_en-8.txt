@@ -1,0 +1,20 @@
+corpus/1k/docs\admin\S4\session-keep-alive-0000288.md:22:- 2026-07-16 Marco Li：关于监控告警，当前实现见 services/billing/invoice-renderer.ts，其中 paymentsRetry 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S1\session-keep-alive-0000433.md:14:待办：为故障演练补充监控告警，指标名统一使用 paymentsRetry_count。
+corpus/1k/docs\admin\S1\session-keep-alive-0000433.md:17:评审结论：故障演练需要补一条断言，覆盖 ERR_401 与 paymentsRetry 同时缺失的路径。
+corpus/1k/docs\admin\S1\session-keep-alive-0000433.md:22:- 监控告警：paymentsRetry 异常比例超过 1% 触发告警，看板见 src/api/middleware/rate-limiter.ts。
+corpus/1k/docs\admin\S1\session-keep-alive-0000433.md:27:- `paymentsRetry`：评审结论：故障演练需要补一条断言，覆盖 E_DEGRADED 与 paymentsRetry 同时缺失的路径。
+corpus/1k/docs\admin\S1\session-keep-alive-0000433.md:29:A missing paymentsRetry used to surface as E_NOT_FOUND; the fix is covered by src/api/middleware/rate-limiter.ts.
+corpus/1k/docs\admin\S4\migration-rollback-0000303.md:33:- 回滚预案：切回上一版本并关闭 paymentsRetry，观察 sessionId 指标 30 分钟。
+corpus/1k/docs\api-gateway\S8\session-keep-alive-0000943.md:26:We cache traceId per tenant and invalidate via paymentsRetry.
+corpus/1k/docs\admin\S1\migration-rollback-0000598.md:36:Benchmarks live in scripts/bench; paymentsRetry is the hot path for normalizePath.
+corpus/1k/docs\admin\S1\migration-rollback-0000598.md:62:- `paymentsRetry`：压测显示 userId 在 S1 阶段出现抖动，需要复核容量评估与回滚。
+corpus/1k/docs\admin\S4\error-taxonomy-0000901.md:23:paymentsRetry wraps writeAheadLog and retries once when ERR_503 is observed.
+corpus/1k/docs\admin\S4\error-taxonomy-0000901.md:30:- 压测显示 paymentsRetry 在 S4 阶段出现抖动，需要复核迁移脚本与权限模型。
+corpus/1k/docs\api-gateway\S8\retry-policy-0000132.md:29:paymentsRetry wraps rateLimiter and retries once when E_CONFLICT is observed.
+corpus/1k/docs\analytics\S8\retry-policy-0000961.md:68:Callers must set traceId and parseFrontmatter; otherwise paymentsRetry rejects the payload with SQLITE_BUSY.
+corpus/1k/docs\api-gateway\S8\migration-rollback-0000547.md:16:writeAheadLog wraps paymentsRetry and retries once when E_TIMEOUT is observed.
+corpus/1k/docs\api-gateway\S8\migration-rollback-0000547.md:21:关于权限模型，当前实现见 src/payments/retry-policy.ts，其中 paymentsRetry 负责合并重试与超时逻辑。
+corpus/1k/docs\api-gateway\S8\migration-rollback-0000547.md:29:设计取舍：把权限模型收敛到网关层，业务侧仅依赖 paymentsRetry 与 ERR_503。
+corpus/1k/docs\api-gateway\S8\migration-rollback-0000547.md:40:Callers must set SQLITE_BUSY and paymentsRetry; otherwise paymentsRetry rejects the payload with E_DEGRADED.
+corpus/1k/docs\billing\S8\session-keep-alive-0000036.md:15:关于缓存失效，当前实现见 infra/terraform/modules/redis/main.tf，其中 paymentsRetry 负责合并重试与超时逻辑。
+corpus/1k/docs\billing\S8\session-keep-alive-0000036.md:32:- 设计取舍：把缓存失效收敛到网关层，业务侧仅依赖 paymentsRetry 与 E_RATE_LIMITED。

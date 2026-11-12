@@ -1,0 +1,281 @@
+== README (why sqlite/features/competitor table) ==
+Claude and Codex can share one provenance-rich knowledge graph with approval-aware promotion workflows.
+
+- **Hybrid retrieval** — BM25/FTS5 keyword search fused with optional semantic (sqlite-vec) results via Reciprocal Rank Fusion, so recall does not depend on exact keywords.
+- **Provenance + reviewable promotion** — memory mutations carry provenance, and candidate claims move to canonical facts through an approval-aware promotion gate (`human_confirmed`, plus policy-gated multi-evidence) instead of silent rewrites.
+- **Cross-agent MCP memory with bridge sync** — one local SQLite knowledge graph any MCP client can read and write, with bridge tools that sync shared entities across machines.
+
+[![CI](https://github.com/RMANOV/sqlite-memory-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/RMANOV/sqlite-memory-mcp/actions/workflows/ci.yml)
+
+It is a production-quality, local-first MCP memory stack: a single SQLite file under WAL concurrency (10+ sessions), FTS5 BM25 search, session tracking, task management, bridge sync, collaboration workflows, and a native system-tray task manager. The core 9 knowledge-graph tools are drop-in compatible with `@modelcontextprotocol/server-memory`; companion FastMCP micro-servers add more tools for sessions, tasks, bridge sync, collaboration, entity linking, and intelligence/multi-agent workflows. A PyQt6 desktop app and standalone automation scripts ship alongside. See the [Tool Reference](#tool-reference) for the exact per-server tool counts.
+
+### Technical deep-dives
+
+- **Medium:** [The Amnesiac That Learned to Remember](https://medium.com/@r.manov/the-amnesiac-that-learned-to-remember-4fe4342db89d)
+- **Dev.to:** [The Amnesiac That Learned to Remember — Building a Brain for Claude Code](https://dev.to/ruslan_manov/the-amnesiac-that-learned-to-remember-building-a-brain-for-claude-code-1ok6)
+- **Dev.to:** [How a SQLite WAL Fix Grew into a 54-Tool MCP Memory Stack](https://dev.to/ruslan_manov/how-a-sqlite-wal-fix-grew-into-a-54-tool-mcp-memory-stack-4nkl)
+
+## Why SQLite?
+
+Existing MCP memory servers use JSONL files, cloud APIs, or heavyweight databases. Each has trade-offs that hurt real-world Claude Code usage:
+
+- **JSONL files** (official MCP memory) -- file locks break with 2+ concurrent sessions. Data corruption is a matter of time.
+- **Cloud APIs** (Mem0, Supabase) -- latency, API keys, privacy concerns, vendor lock-in.
+- **Heavy databases** (Neo4j, ChromaDB, Qdrant) -- Docker, config files, resource overhead for what is essentially a key-value store with search.
+
+SQLite hits the sweet spot:
+
+- **Single file** -- `memory.db` is the entire database. Back it up with `cp`.
+- **Zero config** -- No server process, no Docker, no API keys.
+- **ACID transactions** -- Writes never corrupt, even on power loss.
+- **WAL mode** -- Multiple concurrent readers and writers. 10+ Claude Code sessions, no conflicts.
+- **FTS5** -- Full-text search with BM25 ranking built into the standard library.
+- **stdlib** -- `sqlite3` ships with Python. No additional binary dependencies.
+
+## Features
+
+- **WAL mode** -- 10+ concurrent Claude Code sessions with no file locking conflicts
+- **Hybrid search (BM25 + semantic)** -- FTS5 keyword search fused with optional sqlite-vec cosine similarity via Reciprocal Rank Fusion, then re-ranked with 6 contextual signals (recency, project affinity, graph proximity, observation richness, canonical facts, active session)
+- **Session tracking** -- Save and recall session snapshots for context continuity across restarts
+- **Task management** -- Structured task CRUD with typed queries, priorities, sections, due dates, and recurring tasks
+- **Kanban board** -- Optional HTML report generator for visual task overview via GitHub Pages
+- **Cross-project sharing** -- Optional `project` field scopes entities; omit it to share across all projects
+- **Cross-machine sync** -- Bridge tools push/pull shared entities between machines via a private git repo
+- **Provenance + approval-aware promotion** -- Mutations carry provenance; candidate claims promote to canonical facts through a review gate (`human_confirmed` / policy-gated multi-evidence). See [Advanced & operator topics](#advanced--operator-topics)
+- **Drop-in compatible core** -- All 9 tools from `@modelcontextprotocol/server-memory` work identically in `sqlite_memory`, with many more tools available from companion servers (see [Tool Reference](#tool-reference) for exact per-server counts)
+- **Zero required dependencies beyond stdlib** -- Only `fastmcp` is required for MCP protocol; `sqlite3` is Python stdlib. Optional `orjson`, `sqlite-vec`, and `sentence-transformers` add speed and semantic search
+- **Automatic FTS sync** -- Full-text index stays in sync with every write operation
+- **JSONL migration** -- Optionally import existing `memory.json` knowledge graphs on first run
+
+WORM / tamper-evident or hash-chain claims (until shipped); shipped
+STRIX ↔ `sqlite_memory` integration; edge / on-hardware deployment; premium /
+airlock as a named external feature; an absolute no-data-loss guarantee; vector
+search as the product center or a required baseline; and unbounded "production"
+claims (only production-quality, single-operator, no external customers or
+deployment).
+
+## Competitor Comparison
+
+| Feature | sqlite-memory-mcp | Official MCP Memory | claude-mem0 | @pepk/sqlite | simple-memory | mcp-memory-service | memsearch | memory-mcp | MemoryGraph |
+|---|---|---|---|---|---|---|---|---|---|
+| Storage | SQLite | JSONL file | Mem0 Cloud | SQLite | JSON file | ChromaDB | Qdrant | SQLite | Neo4j |
+| Concurrent 10+ sessions | WAL mode | file locks | cloud | no WAL | file locks | yes | yes | no | yes |
+| Hybrid search (BM25 + vector) | yes (RRF fusion) | substring | no | no | no | vector only | vector only | no | Cypher only |
+| Session tracking | built-in | no | no | no | no | no | no | no | no |
+| Task management | built-in | no | no | no | no | no | no | no | no |
+| Cross-project sharing | project field | no | no | no | no | no | no | no | no |
+| Drop-in compatible | 9/9 tools | baseline | no | partial | no | no | no | partial | no |
+| Setup effort | pip install | npx | API key + pip | pip | npx | Docker + pip | Docker + pip | pip | Docker + Neo4j |
+| Dependencies | sqlite3 (stdlib) | Node.js | Cloud API | sqlite3 | Node.js | ChromaDB | Qdrant | sqlite3 | Neo4j |
+
+### Where this sits in the ecosystem
+
+- **Beads.** sqlite-memory-mcp can sit beside [Beads](https://github.com/steveyegge/beads). Beads is an issue/work-tracking layer for agents; sqlite-memory-mcp is a governed memory layer. There is no shipped Beads adapter — the `ready_context` tool offers a `ready`/`prime` work surface that is the cross-project/cross-machine analog of `bd ready` / `bd prime`, so the two can coexist in the same workflow.
+- **Codex Memories.** OpenAI's Codex has its own memory feature, and the "agent memory" category is gaining mindshare fast. sqlite-memory-mcp is not pitched as a 1:1 replacement; it targets a different point in the design space — a local-first, multi-agent, provenance-governed knowledge graph that any MCP client can share, rather than a single-agent built-in. The category risk is real, which is precisely why the governance and cross-agent surface matter.
+
+## Convergent evolution: sqlite-memory-mcp vs GBrain
+
+[GBrain](https://github.com/garrytan/gbrain) — Garry Tan's structured knowledge layer for AI agents — launched **2026-04-10**. It and sqlite-memory-mcp arrived independently at the same architectural conclusions: local-first storage, hybrid lexical + vector search fused via Reciprocal Rank Fusion, rule-based zero-LLM entity extraction, and a memory-consolidation cycle (GBrain calls it *dream*, sqlite-memory-mcp calls it *reflect*). When two solo founders converge on the same architecture, the design space is real.
+
+The two projects ship **different bets** for different deployments. Public git history establishes that sqlite-memory-mcp's hybrid search shipped on **2026-03-18** (commit [`feat(search): add hybrid semantic search via sqlite-vec + RRF fusion`](https://github.com/RMANOV/sqlite-memory-mcp/commits/main/vec_search.py)) — twenty-three days before GBrain's first public release.
+
+| Axis | GBrain | sqlite-memory-mcp |
+|---|---|---|
+| Initial public release | 2026-04-10 | **2026-03-01** (v0.1.0, 40-day lead) |
+| Hybrid search (BM25 + vector + RRF) | shipped 2026-04-10 | **shipped 2026-03-18** (23-day lead) |
+| Storage primitive | Markdown files in git + PGLite (embedded Postgres) + pgvector | Single SQLite file (FTS5 + sqlite-vec) + bridge git repo |
+| Infrastructure footprint | Postgres runtime + git remote + LLM API | Single binary, single file, optional local embeddings |
+| Embeddings | OpenAI API (network call per page write) | sentence-transformers, fully local |
+
+== schema.py (tables 40-140) ==
+            # Naive ISO timestamp — treat as UTC
+            return dt <= datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+                hours=24
+            )
+        return dt <= datetime.now(timezone.utc) + timedelta(hours=24)
+    except (ValueError, TypeError):
+        return False
+
+
+def clamp_score(val: Any, default: float = 0.0) -> float:
+    """Clamp a score to [0.0, 1.0] range, returning default on invalid input."""
+    try:
+        return max(0.0, min(1.0, float(val)))
+    except (TypeError, ValueError):
+        return default
+
+
+# ── Schema SQL ───────────────────────────────────────────────────────────
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS entities (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT    UNIQUE NOT NULL,
+    entity_type TEXT    NOT NULL,
+    project     TEXT    DEFAULT NULL,
+    shared_by   TEXT    DEFAULT NULL,
+    origin      TEXT    DEFAULT 'local',
+    visibility           TEXT DEFAULT 'private',
+    publish_requested_at TEXT DEFAULT NULL,
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+    id          INTEGER PRIMARY KEY,
+    entity_id   INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    content     TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL,
+    UNIQUE(entity_id, content)
+);
+
+CREATE TABLE IF NOT EXISTS relations (
+    id            INTEGER PRIMARY KEY,
+    from_id       INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    to_id         INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    relation_type TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL,
+    UNIQUE(from_id, to_id, relation_type)
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id           INTEGER PRIMARY KEY,
+    session_id   TEXT    UNIQUE NOT NULL,
+    project      TEXT    DEFAULT NULL,
+    summary      TEXT    DEFAULT NULL,
+    active_files TEXT    DEFAULT NULL,
+    started_at   TEXT    NOT NULL,
+    ended_at     TEXT    DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    description TEXT DEFAULT NULL,
+    status      TEXT NOT NULL DEFAULT 'not_started',
+    priority    TEXT DEFAULT 'medium',
+    section     TEXT DEFAULT 'inbox',
+    due_date    TEXT DEFAULT NULL,
+    project     TEXT DEFAULT NULL,
+    parent_id   TEXT DEFAULT NULL REFERENCES tasks(id) ON DELETE SET NULL,
+    notes       TEXT DEFAULT NULL,
+    recurring   TEXT DEFAULT NULL,
+    reminder_at TEXT DEFAULT NULL,
+    type        TEXT NOT NULL DEFAULT 'task',
+    assignee    TEXT DEFAULT NULL,
+    shared_by   TEXT DEFAULT NULL,
+    visibility           TEXT DEFAULT 'private',
+    publish_requested_at TEXT DEFAULT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_type    ON entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_entities_project ON entities(project);
+CREATE INDEX IF NOT EXISTS idx_obs_entity       ON observations(entity_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_status     ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_section    ON tasks(section);
+CREATE INDEX IF NOT EXISTS idx_tasks_due        ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_tasks_project    ON tasks(project);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent     ON tasks(parent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_type       ON tasks(type);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee   ON tasks(assignee);
+CREATE INDEX IF NOT EXISTS idx_tasks_title      ON tasks(title);
+CREATE INDEX IF NOT EXISTS idx_tasks_updated_at    ON tasks(updated_at);
+CREATE INDEX IF NOT EXISTS idx_entities_updated_at ON entities(updated_at);
+
+CREATE TABLE IF NOT EXISTS pending_shared_tasks (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    description TEXT DEFAULT NULL,
+
+== db_utils.py WAL/busy_timeout/retry ==
+
+_log = logging.getLogger("sqlite-kb")
+
+# ── DB connection ────────────────────────────────────────────────────────
+
+_PRAGMAS = (
+    "PRAGMA journal_mode=WAL;",
+    "PRAGMA foreign_keys=ON;",
+    "PRAGMA busy_timeout=10000;",
+    "PRAGMA wal_autocheckpoint=1000;",
+)
+
+
+_BUSY_RETRIES = 3
+_BUSY_BASE_DELAY = 0.5  # seconds, doubles each retry
+
+
+    assert conn is not None
+    try:
+        yield conn
+        conn.execute("COMMIT;")
+        if checkpoint_after_commit:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK;")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+@contextmanager
+def get_conn(db_path: str | None = None):
+    """Yield a SQLite connection with PRAGMAs set, auto-commit/rollback.
+
+    Uses explicit BEGIN/COMMIT to ensure each context-manager block is atomic.
+    Retries BEGIN up to 3× on SQLITE_BUSY (exponential backoff on top of busy_timeout).
+    """
+    with _open_txn(db_path) as conn:
+        yield conn
+
+
+@contextmanager
+def get_conn_immediate(db_path: str | None = None):
+    """Like ``get_conn()`` but starts the transaction in IMMEDIATE mode.
+
+@contextmanager
+def bulk_conn(db_path: str | None = None):
+    """Connection optimized for bulk inserts: single transaction, relaxed sync.
+
+    Use for batch imports where throughput matters more than per-row durability.
+    WAL checkpoint runs automatically after the transaction commits.
+    """
+    bulk_pragmas = (
+        "PRAGMA journal_mode=WAL;",
+        "PRAGMA foreign_keys=ON;",
+        "PRAGMA busy_timeout=30000;",
+        "PRAGMA synchronous=NORMAL;",
+        "PRAGMA cache_size=-64000;",
+    )
+    with _open_txn(
+        db_path,
+        timeout=30,
+        pragmas=bulk_pragmas,
+        checkpoint_after_commit=True,
+    ) as conn:
+        yield conn
+
+
+# ── Durability: physical backups ─────────────────────────────────────────
+#
+# The git bridge is a lossy *projection*, not a backup: 53 of 86 tables have no
+# bridge representation at all (memory_events, task_field_versions, the whole
+# debate substrate). This is the only crash-consistent, whole-database copy in
+# the system.
+#
+# ``sqlite3.Connection.backup()`` is used deliberately instead of
+# ``shutil.copy``: under WAL a byte copy of ``memory.db`` alone silently drops
+# everything still in ``-wal``, and a copy of all three files taken
+# non-atomically while a writer is live is not crash-consistent. The backup API
+# takes a read snapshot through the pager, so the produced file is a single,
+# self-contained, consistent database.
+
+# Deliberately a *dedicated* subdirectory, not ~/.claude/memory/backups itself:
+# that directory already holds hand-made snapshots (439 MB memory.db files next
+# to multi-GB git bundles). Rolling retention must only ever be able to delete

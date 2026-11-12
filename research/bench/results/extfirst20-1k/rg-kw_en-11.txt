@@ -1,0 +1,20 @@
+corpus/1k/docs\api-gateway\S8\session-keep-alive-0000059.md:51:The normalizePath helper normalises services/auth/session-store.ts and strips the invalid_grant prefix.
+corpus/1k/docs\analytics\S8\canary-checklist-0000880.md:33:normalizePath wraps retryPolicy and retries once when E_DEGRADED is observed.
+corpus/1k/docs\billing\S8\session-keep-alive-0000036.md:26:- 线上问题复盘的根因是 normalizePath 未校验 SQLITE_BUSY，导致容量评估在高峰时段失效。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:35:- 2026-08-26 Alice Chen：压测显示 normalizePath 在 S8 阶段出现抖动，需要复核数据一致性与幂等设计。
+corpus/1k/docs\shipping\S8\migration-rollback-0000254.md:46:- 降级策略：normalizePath 失败时降级为同步调用，错误码统一为 invalid_grant。
+corpus/1k/docs\api-gateway\S8\migration-rollback-0000547.md:30:压测显示 normalizePath 在 S8 阶段出现抖动，需要复核超时重试与权限模型。
+corpus/1k/docs\analytics\S8\error-taxonomy-0000104.md:43:- 2025-12-18 陈晓：压测显示 normalizePath 在 S8 阶段出现抖动，需要复核验收标准与状态机。
+corpus/1k/docs\analytics\S7\session-keep-alive-0000272.md:22:评审结论：迁移脚本需要补一条断言，覆盖 ERR_503 与 normalizePath 同时缺失的路径。
+corpus/1k/docs\analytics\S7\session-keep-alive-0000272.md:25:线上问题复盘的根因是 errorCode 未校验 normalizePath，导致迁移脚本在高峰时段失效。
+corpus/1k/docs\analytics\S7\session-keep-alive-0000272.md:30:- 设计取舍：把迁移脚本收敛到网关层，业务侧仅依赖 normalizePath 与 SQLITE_BUSY。
+corpus/1k/docs\analytics\S7\session-keep-alive-0000272.md:47:- 监控告警：normalizePath 异常比例超过 1% 触发告警，看板见 packages/db/migrations/0007_docs.sql。
+corpus/1k/docs\analytics\S7\session-keep-alive-0000272.md:50:- `errorCode`：本模块在 S7 阶段的核心约束是迁移脚本：normalizePath 必须由调用方显式传入，缺失时返回 E_DEGRADED。
+corpus/1k/docs\auth\S8\session-keep-alive-0000746.md:14:See services/notifications/queue-consumer.ts for the canonical implementation of normalizePath.
+corpus/1k/docs\analytics\S8\canary-checklist-0000720.md:15:The retryPolicy field is validated by normalizePath before the request reaches app/mobile/session-keepalive.ts.
+corpus/1k/docs\analytics\S8\retry-policy-0000961.md:35:Callers must set traceId and parseFrontmatter; otherwise normalizePath rejects the payload with E_TIMEOUT.
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:43:迁移期间保持灰度发布，packages/db/migrations/0007_docs.sql 中的 normalizePath 在旧版本下返回 ERR_503。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:51:- `requestId`：压测显示 normalizePath 在 S8 阶段出现抖动，需要复核权限模型与灰度发布。
+corpus/1k/docs\billing\S8\migration-rollback-0000988.md:45:压测显示 normalizePath 在 S8 阶段出现抖动，需要复核灰度发布与权限模型。
+corpus/1k/docs\analytics\S1\retry-policy-0000830.md:64:parseFrontmatter wraps normalizePath and retries once when E_TIMEOUT is observed.
+corpus/1k/docs\analytics\S7\retry-policy-0000660.md:29:- `normalizePath`：本模块在 S7 阶段的核心约束是数据一致性：retryPolicy 必须由调用方显式传入，缺失时返回 ERR_503。

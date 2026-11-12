@@ -1,0 +1,92 @@
+SOURCE: https://cloud.tencent.com/document/product/1813/132147
+FETCHED: 2026-11-11
+METHOD: HTML -> visible text
+============================================================
+
+腾讯云数据库 AI 服务 读取核心记忆_腾讯云
+腾讯云 最新活动
+大模型
+产品
+解决方案
+定价
+企业中心
+云市场
+开发者
+客户支持
+合作与生态
+了解腾讯云
+搜索
+腾讯云数据库 AI 服务
+文档中心
+入门中心
+API 中心
+SDK 中心
+文档活动
+我的反馈
+帮你快速理解、总结文档 立即下载
+文档中心 > 腾讯云数据库 AI 服务 > Memory 应用指南 > 开发者参考 > V2 版本 > HTTP > 核心记忆 > 读取核心记忆
+读取核心记忆
+最近更新时间： 2026-05-26 21:12:01
+微信扫一扫
+QQ
+新浪微博
+复制链接 链接复制成功
+我的收藏
+本页目录：
+接口介绍
+Method 与 URL
+使用示例
+请求参数
+响应示例
+接口介绍
+本接口（ /core/read ）用于读取 Agent 维度的核心记忆 Markdown 文件全文。核心记忆是 Agent 维度的单体记忆快照，路径由系统固定，无需指定目标：
+路径固定 ：核心记忆文件路径由系统固定（Agent 维度单体），既无需 list 也无需传入 path 。
+请求体形态 ：与场景记忆一致，统一为 POST + JSON body；当前一期请求体传空对象 {} 即可。
+说明：
+尚未沉淀出核心记忆时返回业务错误码 404 ，可通过 写入或覆盖核心记忆 写入即创建。
+Method 与 URL
+POST https:// { 服务访问地址 } /v2/core/read
+使用示例
+curl -i -k -X POST \\
+-H &#x27;Content-Type : application/json&#x27; \\
+-H &#x27;Authorization : Bearer ******************************&#x27; \\
+-H "x-tdai-service-id: mem-8i8t****" \\
+https : //memory.tdai.tencentyun.com/v2/core/read \\
+-d &#x27; { } &#x27;
+说明：
+鉴权说明 ：所有接口都必须在请求头中携带 Authorization: Bearer <API Key> 与 x-tdai-service-id: <Service_ID> ，否则将返回鉴权失败。
+请求参数
+不接收业务请求参数，请求体传空对象 {} 即可。
+响应示例
+{
+"code" : 0 ,
+"message" : "ok" ,
+"request_id" : "req-7fd3b2dd" ,
+"data" : {
+"content" : "# Agent 核心记忆\\n\\n## 用户画像\\n\\n- 偏好深度文化体验\\n- 5 月出行，预算 1.5 万元\\n- 关西线路爱好者\\n\\n## 历史交付\\n\\n- 2026Q1：项目 A、项目 B 已完成\\n" ,
+"created_at" : "2026-04-01T08:00:00Z" ,
+"updated_at" : "2026-04-21T08:30:15Z"
+}
+}
+字段
+类型
+说明
+content
+str
+成功写入的完整 Markdown 文本。
+created_at / updated_at
+str
+核心记忆文件的首次创建时间（created_at）与本次最新同步时间（updated_at）。
+上一篇 : 删除单个场景记忆 下一篇 : 写入或覆盖核心记忆
+Copyright © 2013 -2026 Tencent Cloud. All Rights Reserved.  腾讯云 版权所有
+深圳市腾讯计算机系统有限公司 ICP备案/许可证号： 粤B2-20090059 粤公网安备44030502008569号
+腾讯云计算（北京）有限责任公司 京ICP证150476号 |  京ICP备11018762号
+中国站 中文
+International
+文档“捉虫”活动
+检视指定产品文档，发现和反馈有效问题，奖！
+API专项"捉虫"
+反馈API文档问题，代金券、周边好礼奖不停！
+文档建议，你提了吗
+快来使用腾讯云产品文档，提出有效建议，奖！
+咨询

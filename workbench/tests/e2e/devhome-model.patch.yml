@@ -1,0 +1,24 @@
+# dev web 实例 overlay（Lead/验证）：隔离 .devhome 没有 deskop profile 的模型路由，
+# 这里补 grsai provider（GRSAI_API_KEY 在 credentials refs），让 PM/任务会话能用真实模型跑通。
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: grsai
+    model: gpt-6.1-sol
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      grsai:
+        displayName: GRSAI
+        apiKeyEnv: GRSAI_API_KEY
+        api: openai-responses
+        baseURL: https://grsaiapi.com/v1
+        models:
+          - id: gpt-6.1-sol
+            name: gpt-6.1-sol
+            contextWindow: 400000
+            maxTokens: 32000
+            input:
+              - text
+              - image

@@ -1,0 +1,20 @@
+corpus/1k/docs\admin\S4\session-keep-alive-0000288.md:44:The userId helper normalises src/admin/audit-log.ts and strips the requestId prefix.
+corpus/1k/docs\admin\S8\cache-invalidation-0000965.md:48:关于错误码约定，当前实现见 services/auth/token-refresh.ts，其中 userId 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:16:- 本模块在 S8 阶段的核心约束是限流策略：userId 必须由调用方显式传入，缺失时返回 E_CONFLICT。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:24:A missing userId used to surface as SQLITE_BUSY; the fix is covered by scripts/bench/build-index.mjs.
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:29:- `cacheInvalidate`：评审结论：限流策略需要补一条断言，覆盖 E_DEGRADED 与 userId 同时缺失的路径。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:30:本模块在 S8 阶段的核心约束是回滚预案：userId 必须由调用方显式传入，缺失时返回 invalid_grant。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:34:Callers must set userId and fetchDocuments; otherwise requestId rejects the payload with E_RATE_LIMITED.
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:35:The paymentsRetry helper normalises src/common/errors.ts and strips the userId prefix.
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:37:We cache userId per tenant and invalidate via retryPolicy.
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:40:- `requestId`：待办：为回滚预案补充监控告警，指标名统一使用 userId_count。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:45:本模块在 S8 阶段的核心约束是回滚预案：userId 必须由调用方显式传入，缺失时返回 E_NOT_FOUND。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:48:The userId field is validated by tenantId before the request reaches packages/db/migrations/0007_docs.sql.
+corpus/1k/docs\admin\S4\retry-policy-0000952.md:23:- `userId`：兼容性说明：packages/db/migrations/0007_docs.sql 在 S4 前仍返回 E_NOT_FOUND，请按验收标准处理。
+corpus/1k/docs\notifications\S8\session-keep-alive-0000127.md:72:线上问题复盘的根因是 userId 未校验 errorCode，导致兼容性在高峰时段失效。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:41:- 压测显示 userId 在 S8 阶段出现抖动，需要复核限流策略与权限模型。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000438.md:26:- [ ] 验收标准：userId 缺省时返回 ERR_503，且不产生副作用。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000438.md:31:线上问题复盘的根因是 rateLimiter 未校验 userId，导致容量评估在高峰时段失效。
+corpus/1k/docs\inventory\S8\session-keep-alive-0000439.md:52:- `paymentsRetry`：线上问题复盘的根因是 userId 未校验 tokenRefresh，导致会话保持在高峰时段失效。
+corpus/1k/docs\admin\S8\migration-rollback-0000496.md:52:- `userId`：本模块在 S8 阶段的核心约束是监控告警：traceId 必须由调用方显式传入，缺失时返回 ERR_401。
+corpus/1k/docs\notifications\S8\canary-checklist-0000911.md:36:userId wraps sessionId and retries once when HTTP_429 is observed.

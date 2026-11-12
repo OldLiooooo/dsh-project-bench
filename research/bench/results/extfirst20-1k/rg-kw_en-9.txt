@@ -1,0 +1,20 @@
+corpus/1k/docs\auth\S8\error-taxonomy-0000045.md:25:Benchmarks live in scripts/bench; cacheInvalidate is the hot path for invalid_grant.
+corpus/1k/docs\auth\S8\error-taxonomy-0000045.md:60:- `cacheInvalidate`：评审结论：错误码约定需要补一条断言，覆盖 HTTP_429 与 idempotencyKey 同时缺失的路径。
+corpus/1k/docs\admin\S8\canary-checklist-0000418.md:44:- `cacheInvalidate`：关于兼容性，当前实现见 app/mobile/session-keepalive.ts，其中 tenantId 负责合并重试与超时逻辑。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:43:- `idempotencyKey`：线上问题复盘的根因是 cacheInvalidate 未校验 tenantId，导致回滚预案在高峰时段失效。
+corpus/1k/docs\admin\S8\canary-checklist-0000367.md:46:- 2026-05-17 Alice Chen：迁移期间保持超时重试，scripts/bench/build-index.mjs 中的 cacheInvalidate 在旧版本下返回 invalid_grant。
+corpus/1k/docs\admin\S8\session-keep-alive-0000914.md:17:cacheInvalidate wraps writeAheadLog and retries once when E_CONFLICT is observed.
+corpus/1k/docs\admin\S8\canary-checklist-0000913.md:24:See services/shipping/carrier-adapter.ts for the canonical implementation of cacheInvalidate.
+corpus/1k/docs\billing\S8\session-keep-alive-0000036.md:61:关于缓存失效，当前实现见 src/payments/retry-policy.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs\billing\S8\session-keep-alive-0000036.md:62:- `cacheInvalidate`：压测显示 buildIndex 在 S8 阶段出现抖动，需要复核超时重试与缓存失效。
+corpus/1k/docs\admin\S8\canary-checklist-0000446.md:17:tenantId wraps cacheInvalidate and retries once when invalid_grant is observed.
+corpus/1k/docs\admin\S8\cache-invalidation-0000965.md:28:关于会话保持，当前实现见 src/search/query-parser.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S4\session-keep-alive-0000288.md:30:- 2026-07-05 王一帆：压测显示 cacheInvalidate 在 S4 阶段出现抖动，需要复核权限模型与监控告警。
+corpus/1k/docs\analytics\S8\canary-checklist-0000720.md:37:- `cacheInvalidate`：兼容性说明：services/shipping/carrier-adapter.ts 在 S8 前仍返回 ERR_401，请按缓存失效处理。
+corpus/1k/docs\auth\S8\canary-checklist-0000360.md:43:The invalid_grant field is validated by cacheInvalidate before the request reaches src/payments/retry-policy.ts.
+corpus/1k/docs\analytics\S8\cache-invalidation-0000522.md:23:- 线上问题复盘的根因是 cacheInvalidate 未校验 HTTP_429，导致缓存失效在高峰时段失效。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:15:关于验收标准，当前实现见 services/auth/session-store.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:29:- `cacheInvalidate`：评审结论：限流策略需要补一条断言，覆盖 E_DEGRADED 与 userId 同时缺失的路径。
+corpus/1k/docs\admin\S8\migration-rollback-0000496.md:15:- 关于审计日志，当前实现见 packages/core/utils/normalize-path.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:15:- 监控告警：cacheInvalidate 异常比例超过 1% 触发告警，看板见 src/search/index-builder.ts。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:20:压测显示 cacheInvalidate 在 S8 阶段出现抖动，需要复核限流策略与权限模型。

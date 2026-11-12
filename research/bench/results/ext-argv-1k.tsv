@@ -1,0 +1,160 @@
+rg	kw_en	0	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	sessionId	corpus/1k/docs
+grep	kw_en	0	7	-r	-n	-I	--no-messages	-F	sessionId	corpus/1k/docs
+rg	kw_en	1	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	userId	corpus/1k/docs
+grep	kw_en	1	7	-r	-n	-I	--no-messages	-F	userId	corpus/1k/docs
+rg	kw_en	2	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	tenantId	corpus/1k/docs
+grep	kw_en	2	7	-r	-n	-I	--no-messages	-F	tenantId	corpus/1k/docs
+rg	kw_en	3	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	requestId	corpus/1k/docs
+grep	kw_en	3	7	-r	-n	-I	--no-messages	-F	requestId	corpus/1k/docs
+rg	kw_en	4	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	traceId	corpus/1k/docs
+grep	kw_en	4	7	-r	-n	-I	--no-messages	-F	traceId	corpus/1k/docs
+rg	kw_en	5	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	loadModule	corpus/1k/docs
+grep	kw_en	5	7	-r	-n	-I	--no-messages	-F	loadModule	corpus/1k/docs
+rg	kw_en	6	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	retryPolicy	corpus/1k/docs
+grep	kw_en	6	7	-r	-n	-I	--no-messages	-F	retryPolicy	corpus/1k/docs
+rg	kw_en	7	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	tokenRefresh	corpus/1k/docs
+grep	kw_en	7	7	-r	-n	-I	--no-messages	-F	tokenRefresh	corpus/1k/docs
+rg	kw_en	8	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	paymentsRetry	corpus/1k/docs
+grep	kw_en	8	7	-r	-n	-I	--no-messages	-F	paymentsRetry	corpus/1k/docs
+rg	kw_en	9	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	cacheInvalidate	corpus/1k/docs
+grep	kw_en	9	7	-r	-n	-I	--no-messages	-F	cacheInvalidate	corpus/1k/docs
+rg	kw_en	10	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	rateLimiter	corpus/1k/docs
+grep	kw_en	10	7	-r	-n	-I	--no-messages	-F	rateLimiter	corpus/1k/docs
+rg	kw_en	11	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	normalizePath	corpus/1k/docs
+grep	kw_en	11	7	-r	-n	-I	--no-messages	-F	normalizePath	corpus/1k/docs
+rg	kw_en	12	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	fetchDocuments	corpus/1k/docs
+grep	kw_en	12	7	-r	-n	-I	--no-messages	-F	fetchDocuments	corpus/1k/docs
+rg	kw_en	13	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	parseFrontmatter	corpus/1k/docs
+grep	kw_en	13	7	-r	-n	-I	--no-messages	-F	parseFrontmatter	corpus/1k/docs
+rg	kw_en	14	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	buildIndex	corpus/1k/docs
+grep	kw_en	14	7	-r	-n	-I	--no-messages	-F	buildIndex	corpus/1k/docs
+rg	kw_en	15	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	errorCode	corpus/1k/docs
+grep	kw_en	15	7	-r	-n	-I	--no-messages	-F	errorCode	corpus/1k/docs
+rg	kw_en	16	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	ERR_401	corpus/1k/docs
+grep	kw_en	16	7	-r	-n	-I	--no-messages	-F	ERR_401	corpus/1k/docs
+rg	kw_en	17	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	ERR_503	corpus/1k/docs
+grep	kw_en	17	7	-r	-n	-I	--no-messages	-F	ERR_503	corpus/1k/docs
+rg	kw_en	18	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	E_TIMEOUT	corpus/1k/docs
+grep	kw_en	18	7	-r	-n	-I	--no-messages	-F	E_TIMEOUT	corpus/1k/docs
+rg	kw_en	19	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	SQLITE_BUSY	corpus/1k/docs
+grep	kw_en	19	7	-r	-n	-I	--no-messages	-F	SQLITE_BUSY	corpus/1k/docs
+rg	zh_phrase	0	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	会话保持	corpus/1k/docs
+grep	zh_phrase	0	7	-r	-n	-I	--no-messages	-F	会话保持	corpus/1k/docs
+rg	zh_phrase	1	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	验收标准	corpus/1k/docs
+grep	zh_phrase	1	7	-r	-n	-I	--no-messages	-F	验收标准	corpus/1k/docs
+rg	zh_phrase	2	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	回滚	corpus/1k/docs
+grep	zh_phrase	2	7	-r	-n	-I	--no-messages	-F	回滚	corpus/1k/docs
+rg	zh_phrase	3	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	灰度发布	corpus/1k/docs
+grep	zh_phrase	3	7	-r	-n	-I	--no-messages	-F	灰度发布	corpus/1k/docs
+rg	zh_phrase	4	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	数据一致性	corpus/1k/docs
+grep	zh_phrase	4	7	-r	-n	-I	--no-messages	-F	数据一致性	corpus/1k/docs
+rg	zh_phrase	5	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	幂等设计	corpus/1k/docs
+grep	zh_phrase	5	7	-r	-n	-I	--no-messages	-F	幂等设计	corpus/1k/docs
+rg	zh_phrase	6	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	限流策略	corpus/1k/docs
+grep	zh_phrase	6	7	-r	-n	-I	--no-messages	-F	限流策略	corpus/1k/docs
+rg	zh_phrase	7	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	缓存失效	corpus/1k/docs
+grep	zh_phrase	7	7	-r	-n	-I	--no-messages	-F	缓存失效	corpus/1k/docs
+rg	zh_phrase	8	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	错误码约定	corpus/1k/docs
+grep	zh_phrase	8	7	-r	-n	-I	--no-messages	-F	错误码约定	corpus/1k/docs
+rg	zh_phrase	9	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	审计日志	corpus/1k/docs
+grep	zh_phrase	9	7	-r	-n	-I	--no-messages	-F	审计日志	corpus/1k/docs
+rg	zh_phrase	10	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	权限模型	corpus/1k/docs
+grep	zh_phrase	10	7	-r	-n	-I	--no-messages	-F	权限模型	corpus/1k/docs
+rg	zh_phrase	11	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	迁移脚本	corpus/1k/docs
+grep	zh_phrase	11	7	-r	-n	-I	--no-messages	-F	迁移脚本	corpus/1k/docs
+rg	zh_phrase	12	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	监控告警	corpus/1k/docs
+grep	zh_phrase	12	7	-r	-n	-I	--no-messages	-F	监控告警	corpus/1k/docs
+rg	zh_phrase	13	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	容量评估	corpus/1k/docs
+grep	zh_phrase	13	7	-r	-n	-I	--no-messages	-F	容量评估	corpus/1k/docs
+rg	zh_phrase	14	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	故障演练	corpus/1k/docs
+grep	zh_phrase	14	7	-r	-n	-I	--no-messages	-F	故障演练	corpus/1k/docs
+rg	zh_phrase	15	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	回滚预案	corpus/1k/docs
+grep	zh_phrase	15	7	-r	-n	-I	--no-messages	-F	回滚预案	corpus/1k/docs
+rg	zh_phrase	16	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	兼容性	corpus/1k/docs
+grep	zh_phrase	16	7	-r	-n	-I	--no-messages	-F	兼容性	corpus/1k/docs
+rg	zh_phrase	17	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	超时重试	corpus/1k/docs
+grep	zh_phrase	17	7	-r	-n	-I	--no-messages	-F	超时重试	corpus/1k/docs
+rg	zh_phrase	18	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	降级策略	corpus/1k/docs
+grep	zh_phrase	18	7	-r	-n	-I	--no-messages	-F	降级策略	corpus/1k/docs
+rg	zh_phrase	19	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	状态机	corpus/1k/docs
+grep	zh_phrase	19	7	-r	-n	-I	--no-messages	-F	状态机	corpus/1k/docs
+rg	meta_kw	0	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	ERR_503	corpus/1k/docs/docs/auth/S3
+grep	meta_kw	0	7	-r	-n	-I	--no-messages	-F	ERR_503	corpus/1k/docs/docs/auth/S3
+rg	meta_kw	1	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	userId	corpus/1k/docs/docs/search/S6
+grep	meta_kw	1	7	-r	-n	-I	--no-messages	-F	userId	corpus/1k/docs/docs/search/S6
+rg	meta_kw	2	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	errorCode	corpus/1k/docs/docs/mobile/S3
+grep	meta_kw	2	7	-r	-n	-I	--no-messages	-F	errorCode	corpus/1k/docs/docs/mobile/S3
+rg	meta_kw	3	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	retryPolicy	corpus/1k/docs/docs/refunds/S2
+grep	meta_kw	3	7	-r	-n	-I	--no-messages	-F	retryPolicy	corpus/1k/docs/docs/refunds/S2
+rg	meta_kw	4	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	ERR_401	corpus/1k/docs/docs/shipping/S7
+grep	meta_kw	4	7	-r	-n	-I	--no-messages	-F	ERR_401	corpus/1k/docs/docs/shipping/S7
+rg	meta_kw	5	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	buildIndex	corpus/1k/docs/docs/infra/S1
+grep	meta_kw	5	7	-r	-n	-I	--no-messages	-F	buildIndex	corpus/1k/docs/docs/infra/S1
+rg	meta_kw	6	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	paymentsRetry	corpus/1k/docs/docs/admin/S2
+grep	meta_kw	6	7	-r	-n	-I	--no-messages	-F	paymentsRetry	corpus/1k/docs/docs/admin/S2
+rg	meta_kw	7	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	retryPolicy	corpus/1k/docs/docs/mobile/S3
+grep	meta_kw	7	7	-r	-n	-I	--no-messages	-F	retryPolicy	corpus/1k/docs/docs/mobile/S3
+rg	meta_kw	8	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	SQLITE_BUSY	corpus/1k/docs/docs/inventory/S8
+grep	meta_kw	8	7	-r	-n	-I	--no-messages	-F	SQLITE_BUSY	corpus/1k/docs/docs/inventory/S8
+rg	meta_kw	9	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	sessionId	corpus/1k/docs/docs/notifications/S4
+grep	meta_kw	9	7	-r	-n	-I	--no-messages	-F	sessionId	corpus/1k/docs/docs/notifications/S4
+rg	meta_kw	10	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	tokenRefresh	corpus/1k/docs/docs/analytics/S8
+grep	meta_kw	10	7	-r	-n	-I	--no-messages	-F	tokenRefresh	corpus/1k/docs/docs/analytics/S8
+rg	meta_kw	11	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	cacheInvalidate	corpus/1k/docs/docs/shipping/S7
+grep	meta_kw	11	7	-r	-n	-I	--no-messages	-F	cacheInvalidate	corpus/1k/docs/docs/shipping/S7
+rg	meta_kw	12	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	buildIndex	corpus/1k/docs/docs/admin/S8
+grep	meta_kw	12	7	-r	-n	-I	--no-messages	-F	buildIndex	corpus/1k/docs/docs/admin/S8
+rg	meta_kw	13	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	userId	corpus/1k/docs/docs/inventory/S4
+grep	meta_kw	13	7	-r	-n	-I	--no-messages	-F	userId	corpus/1k/docs/docs/inventory/S4
+rg	meta_kw	14	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	retryPolicy	corpus/1k/docs/docs/infra/S5
+grep	meta_kw	14	7	-r	-n	-I	--no-messages	-F	retryPolicy	corpus/1k/docs/docs/infra/S5
+rg	meta_kw	15	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	ERR_401	corpus/1k/docs/docs/admin/S1
+grep	meta_kw	15	7	-r	-n	-I	--no-messages	-F	ERR_401	corpus/1k/docs/docs/admin/S1
+rg	meta_kw	16	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	tenantId	corpus/1k/docs/docs/mobile/S4
+grep	meta_kw	16	7	-r	-n	-I	--no-messages	-F	tenantId	corpus/1k/docs/docs/mobile/S4
+rg	meta_kw	17	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	userId	corpus/1k/docs/docs/api-gateway/S1
+grep	meta_kw	17	7	-r	-n	-I	--no-messages	-F	userId	corpus/1k/docs/docs/api-gateway/S1
+rg	meta_kw	18	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	E_TIMEOUT	corpus/1k/docs/docs/billing/S8
+grep	meta_kw	18	7	-r	-n	-I	--no-messages	-F	E_TIMEOUT	corpus/1k/docs/docs/billing/S8
+rg	meta_kw	19	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	errorCode	corpus/1k/docs/docs/search/S8
+grep	meta_kw	19	7	-r	-n	-I	--no-messages	-F	errorCode	corpus/1k/docs/docs/search/S8
+rg	timeline	0	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-05-15	corpus/1k/docs
+grep	timeline	0	7	-r	-n	-I	--no-messages	-F	2026-05-15	corpus/1k/docs
+rg	timeline	1	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-10-22	corpus/1k/docs
+grep	timeline	1	7	-r	-n	-I	--no-messages	-F	2026-10-22	corpus/1k/docs
+rg	timeline	2	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-04-25	corpus/1k/docs
+grep	timeline	2	7	-r	-n	-I	--no-messages	-F	2026-04-25	corpus/1k/docs
+rg	timeline	3	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-08-24	corpus/1k/docs
+grep	timeline	3	7	-r	-n	-I	--no-messages	-F	2026-08-24	corpus/1k/docs
+rg	timeline	4	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-03-09	corpus/1k/docs
+grep	timeline	4	7	-r	-n	-I	--no-messages	-F	2026-03-09	corpus/1k/docs
+rg	timeline	5	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-01-25	corpus/1k/docs
+grep	timeline	5	7	-r	-n	-I	--no-messages	-F	2026-01-25	corpus/1k/docs
+rg	timeline	6	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-06-29	corpus/1k/docs
+grep	timeline	6	7	-r	-n	-I	--no-messages	-F	2026-06-29	corpus/1k/docs
+rg	timeline	7	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-08-24	corpus/1k/docs
+grep	timeline	7	7	-r	-n	-I	--no-messages	-F	2026-08-24	corpus/1k/docs
+rg	timeline	8	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2026-01-28	corpus/1k/docs
+grep	timeline	8	7	-r	-n	-I	--no-messages	-F	2026-01-28	corpus/1k/docs
+rg	timeline	9	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-F	2025-12-25	corpus/1k/docs
+grep	timeline	9	7	-r	-n	-I	--no-messages	-F	2025-12-25	corpus/1k/docs
+rg	timeline	10	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-04-20|2026-04-21|2026-04-22|2026-04-23|2026-04-24|2026-04-25|2026-04-26	corpus/1k/docs/docs/admin
+grep	timeline	10	7	-r	-n	-I	--no-messages	-E	2026-04-20|2026-04-21|2026-04-22|2026-04-23|2026-04-24|2026-04-25|2026-04-26	corpus/1k/docs/docs/admin
+rg	timeline	11	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-07-06|2026-07-07|2026-07-08|2026-07-09|2026-07-10|2026-07-11|2026-07-12	corpus/1k/docs/docs/auth
+grep	timeline	11	7	-r	-n	-I	--no-messages	-E	2026-07-06|2026-07-07|2026-07-08|2026-07-09|2026-07-10|2026-07-11|2026-07-12	corpus/1k/docs/docs/auth
+rg	timeline	12	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-01-12|2026-01-13|2026-01-14|2026-01-15|2026-01-16|2026-01-17|2026-01-18	corpus/1k/docs/docs/mobile
+grep	timeline	12	7	-r	-n	-I	--no-messages	-E	2026-01-12|2026-01-13|2026-01-14|2026-01-15|2026-01-16|2026-01-17|2026-01-18	corpus/1k/docs/docs/mobile
+rg	timeline	13	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-10-12|2026-10-13|2026-10-14|2026-10-15|2026-10-16|2026-10-17|2026-10-18	corpus/1k/docs/docs/infra
+grep	timeline	13	7	-r	-n	-I	--no-messages	-E	2026-10-12|2026-10-13|2026-10-14|2026-10-15|2026-10-16|2026-10-17|2026-10-18	corpus/1k/docs/docs/infra
+rg	timeline	14	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-07-27|2026-07-28|2026-07-29|2026-07-30|2026-07-31|2026-08-01|2026-08-02	corpus/1k/docs/docs/reporting
+grep	timeline	14	7	-r	-n	-I	--no-messages	-E	2026-07-27|2026-07-28|2026-07-29|2026-07-30|2026-07-31|2026-08-01|2026-08-02	corpus/1k/docs/docs/reporting
+rg	timeline	15	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-08-17|2026-08-18|2026-08-19|2026-08-20|2026-08-21|2026-08-22|2026-08-23	corpus/1k/docs/docs/onboarding
+grep	timeline	15	7	-r	-n	-I	--no-messages	-E	2026-08-17|2026-08-18|2026-08-19|2026-08-20|2026-08-21|2026-08-22|2026-08-23	corpus/1k/docs/docs/onboarding
+rg	timeline	16	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-08-24|2026-08-25|2026-08-26|2026-08-27|2026-08-28|2026-08-29|2026-08-30	corpus/1k/docs/docs/reporting
+grep	timeline	16	7	-r	-n	-I	--no-messages	-E	2026-08-24|2026-08-25|2026-08-26|2026-08-27|2026-08-28|2026-08-29|2026-08-30	corpus/1k/docs/docs/reporting
+rg	timeline	17	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2025-12-29|2025-12-30|2025-12-31|2026-01-01|2026-01-02|2026-01-03|2026-01-04	corpus/1k/docs/docs/mobile
+grep	timeline	17	7	-r	-n	-I	--no-messages	-E	2025-12-29|2025-12-30|2025-12-31|2026-01-01|2026-01-02|2026-01-03|2026-01-04	corpus/1k/docs/docs/mobile
+rg	timeline	18	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-08-03|2026-08-04|2026-08-05|2026-08-06|2026-08-07|2026-08-08|2026-08-09	corpus/1k/docs/docs/payments
+grep	timeline	18	7	-r	-n	-I	--no-messages	-E	2026-08-03|2026-08-04|2026-08-05|2026-08-06|2026-08-07|2026-08-08|2026-08-09	corpus/1k/docs/docs/payments
+rg	timeline	19	9	-n	--with-filename	--no-heading	--no-messages	--no-ignore	--no-config	-e	2026-07-13|2026-07-14|2026-07-15|2026-07-16|2026-07-17|2026-07-18|2026-07-19	corpus/1k/docs/docs/admin
+grep	timeline	19	7	-r	-n	-I	--no-messages	-E	2026-07-13|2026-07-14|2026-07-15|2026-07-16|2026-07-17|2026-07-18|2026-07-19	corpus/1k/docs/docs/admin

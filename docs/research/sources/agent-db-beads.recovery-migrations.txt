@@ -1,0 +1,191 @@
+== docs/recovery/database-corruption.md (1-90) ==
+---
+title: Database Corruption
+description: Tell an unavailable or busy database from a damaged one, and recover a Beads database that will not open
+---
+
+This runbook covers a Beads database that will not open, in embedded mode (the
+default, data in `.beads/embeddeddolt/`) and in server mode (data in
+`.beads/dolt/` by default). Many errors that look like corruption are not, so
+diagnose first and change nothing on disk until you know which case you have.
+
+## Symptoms
+
+- **The server is unavailable** (server mode only): `bd` reports that the Dolt
+  server is not running or not accepting connections. Check `bd dolt status`
+  and the server log, `.beads/dolt-server.log` (in shared server mode,
+  `~/.beads/shared-server/dolt-server.log`). A stopped server is not
+  corruption: start it with `bd dolt start`. If the log reports a corrupted
+  journal, continue with [Engine won't open](#engine-wont-open).
+- **The database is locked or busy**: `bd` reports `database is locked`, or
+  waits, after another command was interrupted or while agents are running.
+  See [Lock errors after an interrupted command](#lock-errors-after-an-interrupted-command).
+- **The engine reports a journal or open error**: every `bd` command fails
+  while opening the database, for example with `corrupted journal` or
+  `possible data loss detected in journal file`, even though no other `bd`
+  process is running. Continue with [Engine won't open](#engine-wont-open).
+
+## Lock errors after an interrupted command
+
+After an interrupted or killed command you may find a lock file left behind
+(in embedded mode a `LOCK` pathname inside the database's `.dolt/`
+directory), or see `database is locked` errors on the next command.
+
+A leftover lock file is not evidence of a held lock. Dolt takes its locks
+through the operating system, and the kernel releases a process's file locks
+when the process dies, so a lock left behind by a killed command is normally
+already released: an existing `LOCK` file alone diagnoses nothing.
+
+Live contention means another process is still using the database right now:
+in embedded mode another `bd` process (often an agent or a script still
+running a batch) working in the same workspace, in server mode the Dolt
+server. It is resolved by waiting for or stopping the actual holder, not by
+rebuilding the database. `bd dolt stop` stops a server that bd manages; it
+cannot stop an arbitrary embedded `bd` process. End that process yourself
+after confirming it is really yours to stop:
+
+```bash
+ps aux | grep '[b]d '     # find the bd process still working in this workspace
+kill <pid>                # only once you know it is yours and safe to stop
+bd dolt stop              # server mode: stop the managed server
+```
+
+Never delete files inside `.dolt/` (including `noms/LOCK`) to clear a lock.
+Lock files are part of the engine's on-disk format; deleting engine internals
+is what actually risks corruption, which is why `bd doctor` refuses to touch
+Dolt-internal lock files. Retry once the holder is gone. Only if every `bd`
+command still fails to open the database with no holder left, continue with
+[Engine won't open](#engine-wont-open).
+
+## Engine won't open
+
+`bd doctor --fix` does not rebuild a journal the engine cannot open, and
+general bd doctor checks are not supported in embedded mode (only
+`bd doctor --check=artifacts`, `--check=conventions` and `--check=pollution`
+run there). Recovery means building a new database from a copy of your data
+that still opens, while keeping the damaged store intact.
+
+In releases after v1.3.2, `bd doctor --fix` backs up or deletes a database
+only inside the workspace's `.beads` directory (a symlinked `.beads` counts),
+or at the location `BEADS_DOLT_DATA_DIR` selects. Automatic integrity recovery
+and the repo fingerprint fix's "Reinitialize database" choice refuse a
+`dolt_data_dir` or `database` path that points outside `.beads`, at `.beads`
+itself, or through a symlink, and leave it untouched; recover such a store by
+hand with the steps below. If `bd init` fails during automatic recovery and
+the database location changed meanwhile, bd leaves the backup where it is and
+prints the path it wrote the backup to; if a directory above the database was
+replaced, the backup moved with that directory.
+
+### 1. Stop everything that uses the store
+
+Stop every bd process, agent and script that works in this workspace. In
+server mode also stop the managed server with `bd dolt stop`; in shared server
+mode that server serves every project on the machine, so check what else
+depends on it first.
+
+### 2. Preserve the damaged store
+
+Copy the whole store and its configuration before you change anything. Find
+the store first instead of assuming the default path. `bd context --json`
+reads only configuration files, so it answers even when the database will not
+open. Its `beads_dir` is the `.beads` directory bd actually uses: in a git
+
+== internal/storage/schema/migrations/README.md (first 60) ==
+# Writing migrations against Dolt
+
+Migration files here are **frozen once merged** (`scripts/check-migration-hygiene.sh`
+check C): editing one forks fresh clones from upgraded clones through the
+recorded content hash. A migration that FAILS on drifted databases cannot be
+fixed forward with a new migration either, because the failing file aborts the
+pass before any higher version runs. The escape hatch is a **pre-migration
+repair** in Go, keyed to the pending version — see the header of
+`../migration_repairs.go` and the `preMigrationRepairs` registry.
+
+## Measured Dolt behaviours
+
+These were measured against real Dolt (2.1.2 and 2.2.3) and confirmed against
+Dolt/GMS source while fixing migration 0058. Each one has already cost a
+redesign; they are recorded here so the next author does not re-derive them.
+
+**DDL is not transactional across statements.** Each DDL statement implicitly
+commits, so `START TRANSACTION` … `ALTER` … `ROLLBACK` leaves the table altered.
+A destructive multi-statement rebuild cannot be made atomic by wrapping it. Make
+each step individually guarded and resumable instead.
+
+**A foreign key on the base column of a stored generated column is rejected —
+on `ADD` *and* at `CREATE TABLE` time.**
+
+```
+Error 1105 (HY000): Cannot add foreign key on the base column of a stored
+generated column.
+```
+
+The restriction is asymmetric: key-then-generated-column is accepted,
+generated-column-then-key is not. That asymmetry is the only reason a table can
+legitimately hold both, and it dictates the order of any rebuild. This is what
+blocked 0058, whose two `ADD CONSTRAINT`s target the columns feeding
+`depends_on_id`'s `COALESCE`.
+
+**Foreign key constraint names are database-scoped, not table-scoped.** Dolt
+keeps a root-wide collection and duplicate-name lookup ignores the declaring
+table, so two tables cannot hold the same constraint name even transiently. A
+build-alongside-and-swap rebuild cannot reuse the real constraint names on its
+replacement table.
+
+**A foreign key holds its backing index hostage.**
+
+```
+Error 1553 (HY000): can't drop index 'PRIMARY': needed in foreign key
+constraint fk_wisp_dep_issue
+```
+
+Drop the foreign keys before `DROP PRIMARY KEY` and re-add them last. On the
+legacy `wisp_dependencies` shape the primary key is the only `issue_id`-leading
+index, so `fk_wisp_dep_issue` alone blocks the rebuild.
+
+**Updating a base column rewrites a stored generated column, and therefore any
+key over it.** Nulling one target column to satisfy a "exactly one target" check
+recomputes a `COALESCE` generated column, which can land the row on another
+row's value in a composite primary key that includes it:
+
+```
+duplicate primary key given: [w2,external:e1]
+```
+
+== README.md schema version guard ==
+### Schema Version Guard
+
+`bd` checks the database schema version at open time. If the database has been
+migrated by a newer binary and an older binary tries to open it, `bd` exits
+with an actionable error rather than issuing queries that fail with cryptic SQL
+errors:
+
+````
+schema version mismatch: database is at v45, binary knows up to v42 (3 migrations ahead)
+
+  Your bd binary is stale. Queries for dropped or renamed columns will fail
+  with cryptic SQL errors (e.g. "column X could not be found in any table in scope").
+
+  Rebuild from main:
+    CGO_ENABLED=0 go build -tags gms_pure_go ./cmd/bd
+
+  Or install the latest release:
+    CGO_ENABLED=0 go install -tags gms_pure_go github.com/steveyegge/beads/cmd/bd@latest
+
+  To proceed despite the risk (some read commands may still work):
+    BD_IGNORE_SCHEMA_SKEW=1 bd <command>
+    bd --ignore-schema-skew <command>
+````
+
+**When this fires:** only when the database schema is *ahead* of the binary
+(a newer binary migrated the database; this binary doesn't know those
+migrations). Normal upgrades, where the binary migrates the database forward,
+are unaffected.
+
+**Escape hatch:** `BD_IGNORE_SCHEMA_SKEW=1` (or `--ignore-schema-skew`) bypasses
+the guard with a warning on stderr. Use this only if you know the forward
+migrations are additive and safe for your specific workload.
+
+
+== migration count ==
+141

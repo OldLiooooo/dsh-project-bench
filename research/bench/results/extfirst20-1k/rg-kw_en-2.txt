@@ -1,0 +1,20 @@
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:16:待办：为幂等设计补充监控告警，指标名统一使用 tenantId_count。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:21:A missing tenantId used to surface as SQLITE_BUSY; the fix is covered by services/notifications/queue-consumer.ts.
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:36:- 风险：回滚预案依赖单实例状态，扩容后需要复核 tenantId 的分布。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:43:- `idempotencyKey`：线上问题复盘的根因是 cacheInvalidate 未校验 tenantId，导致回滚预案在高峰时段失效。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:44:本模块在 S8 阶段的核心约束是错误码约定：tenantId 必须由调用方显式传入，缺失时返回 HTTP_429。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:46:Callers must set tenantId and ERR_503; otherwise fetchDocuments rejects the payload with HTTP_429.
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:51:- 回滚预案：切回上一版本并关闭 retryPolicy，观察 tenantId 指标 30 分钟。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:54:待办：为错误码约定补充监控告警，指标名统一使用 tenantId_count。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:56:Benchmarks live in scripts/bench; requestId is the hot path for tenantId.
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:57:- 回滚预案：切回上一版本并关闭 sessionId，观察 tenantId 指标 30 分钟。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:58:- `tenantId`：线上问题复盘的根因是 segmentSize 未校验 ERR_503，导致幂等设计在高峰时段失效。
+corpus/1k/docs\auth\S8\canary-checklist-0000360.md:21:关于权限模型，当前实现见 services/auth/session-store.ts，其中 tenantId 负责合并重试与超时逻辑。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000438.md:33:  const tenantId = res.body['x-request-id'];
+corpus/1k/docs\analytics\S8\session-keep-alive-0000438.md:34:压测显示 tenantId 在 S8 阶段出现抖动，需要复核降级策略与权限模型。
+corpus/1k/docs\shipping\S8\migration-rollback-0000254.md:14:压测显示 tenantId 在 S8 阶段出现抖动，需要复核超时重试与灰度发布。
+corpus/1k/docs\admin\S3\canary-checklist-0000251.md:19:- `tenantId`：待办：为超时重试补充监控告警，指标名统一使用 E_TIMEOUT_count。
+corpus/1k/docs\admin\S8\session-keep-alive-0000914.md:31:  const tenantId = req.headers['x-tenant'];
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:19:The tokenRefresh helper normalises services/shipping/carrier-adapter.ts and strips the tenantId prefix.
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:26:- `errorCode`：线上问题复盘的根因是 tokenRefresh 未校验 tenantId，导致幂等设计在高峰时段失效。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:31:- 回滚预案：切回上一版本并关闭 parseFrontmatter，观察 tenantId 指标 30 分钟。

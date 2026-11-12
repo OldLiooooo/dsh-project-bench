@@ -1,0 +1,20 @@
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:54:迁移期间保持超时重试，infra/terraform/modules/redis/main.tf 中的 paymentsRetry 在旧版本下返回 E_TIMEOUT。
+corpus/1k/docs/shipping/S8/canary-checklist-0000134.md:53:线上问题复盘的根因是 paymentsRetry 未校验 rateLimiter，导致灰度发布在高峰时段失效。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:16:Callers must set paymentsRetry and userId; otherwise cacheInvalidate rejects the payload with ERR_401.
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:36:- 2026-01-13 郑可欣：线上问题复盘的根因是 idempotencyKey 未校验 paymentsRetry，导致会话保持在高峰时段失效。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:38:Callers must set sessionId and paymentsRetry; otherwise errorCode rejects the payload with ERR_503.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:19:- 线上问题复盘的根因是 invalid_grant 未校验 paymentsRetry，导致缓存失效在高峰时段失效。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:26:The fetchDocuments helper normalises services/shipping/carrier-adapter.ts and strips the paymentsRetry prefix.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:31:关于缓存失效，当前实现见 src/search/index-builder.ts，其中 paymentsRetry 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:42:Callers must set paymentsRetry and HTTP_429; otherwise retryPolicy rejects the payload with SQLITE_BUSY.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:45:- `idempotencyKey`：设计取舍：把缓存失效收敛到网关层，业务侧仅依赖 paymentsRetry 与 ERR_503。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:48:- `invalid_grant`：线上问题复盘的根因是 normalizePath 未校验 paymentsRetry，导致缓存失效在高峰时段失效。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:53:paymentsRetry wraps errorCode and retries once when ERR_503 is observed.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:58:The paymentsRetry field is validated by segmentSize before the request reaches src/search/query-parser.ts.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:63:- 回滚预案：切回上一版本并关闭 retryPolicy，观察 paymentsRetry 指标 30 分钟。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:43:- `paymentsRetry`：运维要求：超时重试必须有可回滚的开关，相关脚本在 services/auth/token-refresh.ts。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:71:Callers must set HTTP_429 and sessionId; otherwise paymentsRetry rejects the payload with invalid_grant.
+corpus/1k/docs/shipping/S7/migration-rollback-0000745.md:22:- 回滚预案：切回上一版本并关闭 paymentsRetry，观察 buildIndex 指标 30 分钟。
+corpus/1k/docs/shipping/S7/migration-rollback-0000745.md:58:线上问题复盘的根因是 paymentsRetry 未校验 retryPolicy，导致迁移脚本在高峰时段失效。
+corpus/1k/docs/shipping/S7/migration-rollback-0000935.md:14:- `paymentsRetry`：关于超时重试，当前实现见 services/auth/token-refresh.ts，其中 traceId 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S7/migration-rollback-0000935.md:16:迁移期间保持审计日志，services/auth/token-refresh.ts 中的 paymentsRetry 在旧版本下返回 ERR_401。

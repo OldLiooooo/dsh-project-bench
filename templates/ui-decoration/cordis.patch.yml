@@ -1,0 +1,5 @@
+# 本组合包被 profile 的 dsh.profile.bundles 列出时，这一层会叠加到配置树上。
+# 插件行按包名引用（安装后由 Node 模块解析找到），不要写相对路径。
+- insert:
+    - id: my-decoration
+      name: '@local/my-decoration'

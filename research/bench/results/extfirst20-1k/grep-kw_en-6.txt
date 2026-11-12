@@ -1,0 +1,20 @@
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:19:- `retryPolicy`：兼容性说明：packages/core/utils/normalize-path.ts 在 S8 前仍返回 invalid_grant，请按验收标准处理。
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:24:- `retryPolicy`：线上问题复盘的根因是 tokenRefresh 未校验 sessionId，导致验收标准在高峰时段失效。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:27:- `retryPolicy`：评审结论：灰度发布需要补一条断言，覆盖 ERR_401 与 sessionId 同时缺失的路径。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:31:- 迁移期间保持会话保持，scripts/bench/build-index.mjs 中的 retryPolicy 在旧版本下返回 HTTP_429。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:54:- `retryPolicy`：待办：为灰度发布补充监控告警，指标名统一使用 userId_count。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:25:- `segmentSize`：压测显示 retryPolicy 在 S8 阶段出现抖动，需要复核回滚预案与幂等设计。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:51:- 回滚预案：切回上一版本并关闭 retryPolicy，观察 tenantId 指标 30 分钟。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:42:Callers must set paymentsRetry and HTTP_429; otherwise retryPolicy rejects the payload with SQLITE_BUSY.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:62:We cache HTTP_429 per tenant and invalidate via retryPolicy.
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:63:- 回滚预案：切回上一版本并关闭 retryPolicy，观察 paymentsRetry 指标 30 分钟。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:68:压测显示 retryPolicy 在 S7 阶段出现抖动，需要复核降级策略与灰度发布。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:27:关于权限模型，当前实现见 services/auth/token-refresh.ts，其中 retryPolicy 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:29:- `userId`：迁移期间保持回滚预案，src/payments/retry-policy.ts 中的 retryPolicy 在旧版本下返回 ERR_503。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:63:- 2026-08-04 孙博文：线上问题复盘的根因是 retryPolicy 未校验 sessionId，导致回滚预案在高峰时段失效。
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:15:- 2026-08-22 Alice Chen：本模块在 S7 阶段的核心约束是错误码约定：retryPolicy 必须由调用方显式传入，缺失时返回 E_DEGRADED。
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:24:A missing retryPolicy used to surface as E_NOT_FOUND; the fix is covered by packages/core/utils/normalize-path.ts.
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:27:- 2025-12-04 郑可欣：本模块在 S7 阶段的核心约束是错误码约定：retryPolicy 必须由调用方显式传入，缺失时返回 E_RATE_LIMITED。
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:30:线上问题复盘的根因是 requestId 未校验 retryPolicy，导致错误码约定在高峰时段失效。
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:36:评审结论：错误码约定需要补一条断言，覆盖 SQLITE_BUSY 与 retryPolicy 同时缺失的路径。
+corpus/1k/docs/shipping/S7/migration-rollback-0000745.md:20:The retryPolicy field is validated by rateLimiter before the request reaches app/mobile/session-keepalive.ts.

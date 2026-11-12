@@ -1,0 +1,16 @@
+{
+  "tier": "1k",
+  "docs": 1000,
+  "dirs": 120,
+  "lines": {
+    "min": 30,
+    "max": 80,
+    "total": 55834,
+    "avg": 55.834
+  },
+  "bytes": 3141167,
+  "bytesPerDoc": 3141.167,
+  "elapsedMs": 137.0386,
+  "docsPerSec": 7297.214069612503,
+  "generatedAt": "2026-11-11T10:29:40.056Z"
+}

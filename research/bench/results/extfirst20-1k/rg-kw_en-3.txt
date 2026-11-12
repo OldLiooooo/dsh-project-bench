@@ -1,0 +1,20 @@
+corpus/1k/docs\auth\S8\error-taxonomy-0000045.md:37:- 回滚预案：切回上一版本并关闭 requestId，观察 invalid_grant 指标 30 分钟。
+corpus/1k/docs\auth\S8\error-taxonomy-0000045.md:40:retryPolicy wraps requestId and retries once when HTTP_429 is observed.
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:34:Callers must set userId and fetchDocuments; otherwise requestId rejects the payload with E_RATE_LIMITED.
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:40:- `requestId`：待办：为回滚预案补充监控告警，指标名统一使用 userId_count。
+corpus/1k/docs\admin\S8\retry-policy-0000681.md:46:- `requestId`：本模块在 S8 阶段的核心约束是验收标准：fetchDocuments 必须由调用方显式传入，缺失时返回 ERR_401。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:53:关于回滚预案，当前实现见 src/search/query-parser.ts，其中 requestId 负责合并重试与超时逻辑。
+corpus/1k/docs\shipping\S8\retry-policy-0000242.md:56:Benchmarks live in scripts/bench; requestId is the hot path for tenantId.
+corpus/1k/docs\auth\S8\canary-checklist-0000360.md:30:压测显示 requestId 在 S8 阶段出现抖动，需要复核权限模型与超时重试。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:16:关于幂等设计，当前实现见 packages/core/utils/normalize-path.ts，其中 requestId 负责合并重试与超时逻辑。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:37:关于幂等设计，当前实现见 app/mobile/session-keepalive.ts，其中 requestId 负责合并重试与超时逻辑。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:48:fetchDocuments wraps requestId and retries once when ERR_503 is observed.
+corpus/1k/docs\admin\S8\cache-invalidation-0000706.md:32:压测显示 requestId 在 S8 阶段出现抖动，需要复核故障演练与回滚预案。
+corpus/1k/docs\admin\S8\cache-invalidation-0000706.md:62:- 回滚预案：切回上一版本并关闭 requestId，观察 ERR_503 指标 30 分钟。
+corpus/1k/docs\shipping\S8\migration-rollback-0000254.md:21:We cache userId per tenant and invalidate via requestId.
+corpus/1k/docs\auth\S8\canary-checklist-0000357.md:14:Benchmarks live in scripts/bench; requestId is the hot path for parseFrontmatter.
+corpus/1k/docs\admin\S8\cache-invalidation-0000585.md:38:Callers must set requestId and loadModule; otherwise traceId rejects the payload with ERR_401.
+corpus/1k/docs\admin\S8\cache-invalidation-0000585.md:53:线上问题复盘的根因是 invalid_grant 未校验 requestId，导致状态机在高峰时段失效。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:51:- `requestId`：压测显示 normalizePath 在 S8 阶段出现抖动，需要复核权限模型与灰度发布。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:65:- 2026-01-13 刘子涵：线上问题复盘的根因是 requestId 未校验 E_TIMEOUT，导致权限模型在高峰时段失效。
+corpus/1k/docs\admin\S8\cache-invalidation-0000965.md:14:The normalizePath helper normalises services/auth/token-refresh.ts and strips the requestId prefix.

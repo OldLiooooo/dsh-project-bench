@@ -1,0 +1,100 @@
+== Backlog.md README (markdown-native/AI-ready) ==
+2. **Review the plan:** the agent researches your codebase and writes its implementation plan
+   into the task. Approve it or steer before any code is written.
+3. **Review the code:** one task = one context window = one PR. Diffs stay a size a human can
+   actually read.
+
+Afterwards, the completed tasks remain in Git as a permanent record of what was attempted and why,
+legible to you, your team, and the next agent.
+
+**Dogfooded:** nearly all of Backlog.md's own code is written by AI agents working through
+Backlog.md itself. The full task ledger lives in this repo's [backlog folder](backlog/tasks).
+
+📺 **See it in action:** [Devoxx Belgium 2025](https://www.youtube.com/watch?v=LSoDQU_9MMA) · [AI Engineer Code Summit 2025](https://www.youtube.com/watch?v=zMXKhhwiCIc)
+
+## Features
+
+* 🤖 **AI-ready** -- works with Claude Code, Gemini CLI, Codex, Kiro & any other MCP or CLI compatible AI assistant
+
+* 📝 **Markdown-native tasks** -- every task is a plain `.md` file in your repo
+
+* ✅ **Acceptance criteria & Definition of Done** -- verifiable scope per task, plus a reusable DoD checklist for every new task
+
+* 🎯 **Milestones & dependencies** -- structure bigger efforts and make execution order reviewable, with task detail showing what a task waits on and what waits on it
+
+* 📊 **Terminal Kanban** -- `backlog board` paints a live board in your shell; `backlog board export` creates shareable markdown reports
+
+* 🌐 **Web UI** -- `backlog browser` serves a local Kanban board with drag-and-drop and task editing forms
+
+* 🔍 **Search** -- fuzzy search across tasks, docs & decisions with `backlog search`
+
+* 🔒 **Local-first** -- no server, no account, no telemetry; tasks are plain files in your repo, and remote Git operations are optional
+
+* 💻 Cross-platform (macOS, Linux, Windows) · 🆓 MIT-licensed & open-source
+
+
+---
+
+with an SSE4.2 minimum and automatic CPU-specific paths. Pre-AVX2 compatibility
+is checked under Ivy Bridge emulation. Intel macOS users can use the npm, Bun,
+or Homebrew installation instead.
+
+The init wizard will ask how you want to connect AI tools:
+- **CLI instructions** (recommended): creates a short instruction file that tells agents to run `backlog instructions overview`.
+- **MCP connector**: optionally auto-configures Claude Code, Codex, Gemini CLI, Kiro or Cursor for teams that prefer MCP.
+- **Skip**: no AI setup; use Backlog.md purely as a task manager.
+
+For Cursor with CLI instructions, select AGENTS.md or pass `--agent-instructions cursor`; both use the same AGENTS.md target. Backlog.md preserves existing AGENTS.md content and does not migrate or remove unrelated user-managed `.cursor/rules` files.
+
+Everything is stored as human-readable Markdown in a project-local backlog folder such as `backlog/`, `.backlog/`, or a custom project-relative path configured through `backlog.config.yml` (e.g. `backlog_directory: my-backlog`). Task IDs use a configurable prefix (`backlog init --task-prefix`): the default produces `TASK-1`-style IDs, while this repository uses `back`, so examples below show `BACK-1`-style IDs. Git is optional: `backlog init --no-git` creates a filesystem-only project.
+
+> [!TIP]
+> **Want an architecture diagram of your repo, kept up to date automatically?** See the [Backlog.md + Groma.md integration](#groma-md) below.
+
+---
+
+## Working with AI agents
+
+== Backlog.md task file format ==
+---
+id: BACK-200
+title: Add Claude Code integration with workflow commands during init
+status: To Do
+assignee: []
+created_date: '2025-07-23'
+updated_date: '2025-09-06 21:22'
+labels:
+  - enhancement
+  - developer-experience
+dependencies:
+  - task-24.1
+  - task-208
+priority: medium
+---
+
+## Description
+
+Enable users to leverage Claude Code's custom commands feature by generating a .claude directory with pre-configured workflow prompts when running 'backlog init'. This will streamline common backlog.md workflows like parsing PRDs, planning tasks, managing branches, and conducting code reviews.
+
+
+== Backlog.md CLI agent instructions ==
+# CLI Reference
+
+Full command reference for Backlog.md. For getting started, see [README.md](README.md).
+
+All examples use the `backlog` command, available after installing the `backlog.md` package globally (`npm i -g backlog.md`) or as a project dependency. For one-off runs without installing, use the full package name — `npx backlog.md <command>`, e.g. `npx backlog.md board`; without an install, `npx backlog` resolves to an unrelated third-party npm package, not this tool.
+
+## Project Setup
+
+| Action      | Example                                              |
+|-------------|------------------------------------------------------|
+| Initialize project | `backlog init [project-name]` (creates backlog structure with a minimal interactive flow) |
+| Re-initialize | `backlog init` (preserves existing config, allows updates) |
+| Advanced settings wizard | `backlog config` (no args) — launches the full interactive configuration flow |
+
+`backlog init` keeps first-run setup focused on the essentials:
+- **Project name** – identifier for your backlog (defaults to the current directory on re-run).
+- **Backlog folder** – choose `backlog/`, `.backlog/`, or a custom project-relative path.
+- **Config location** – for built-in folders, choose folder-local `config.yml` or root `backlog.config.yml`; custom paths use root `backlog.config.yml`.
+- **Integration choice** – decide whether your AI tools use **CLI instructions** (recommended), the optional **MCP connector**, or no AI setup.
+- **Instruction files (CLI path)** – the CLI setup writes a short nudge to AGENTS.md by default in non-interactive setup. `--agent-instructions cursor` also selects AGENTS.md, and the interactive CLI and Web setup identify Cursor under that shared target. Existing user-managed `.cursor/rules` files may coexist; Backlog.md does not migrate or remove them, and repeated initialization preserves non-Backlog content in AGENTS.md.

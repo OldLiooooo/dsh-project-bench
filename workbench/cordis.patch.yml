@@ -1,0 +1,174 @@
+# 项目工作台 bundle patch（T4 orchestration）
+# 层顺序（web profile）：dsh-base → dsh-web-app → dsh-experimental-agent-team-profile → 本 bundle。
+# 注意：patch 命中已有行时**整体替换该行 config**（不深合并），因此 subagent 行重述全部键。
+
+# ── 1) 本插件行（host 运行时：工具/提示注入/会话钩子/HTTP/驾驶舱数据） ────────────
+- insert:
+    - id: project-workbench
+      name: '@local/dsh-project-workbench'
+      config: {}
+
+# ── 2) 子 agent 深度/容量 ─────────────────────────────────────────────────────
+# 任务会话需要再拉一层子 agent（任务会话本身 delegationDepth=1，maxDepth=2 才允许它委派）；
+# maxActiveSubagents 保持默认 8（顶层父级不占名额）。
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+  config:
+    maxActiveSubagents: 8
+    maxDepth: 2
+
+# ── 3) 项目办公室 PM preset（唯一用户接口；不写文件/代码，不拉子 agent） ──────────
+- insert:
+    - id: preset-project-office
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: project-office
+        name: 项目办公室（PM）
+        description: 工作台的 PM 会话：理解需求、拆切片/任务、拉起任务会话、收结果、汇总决策、请求门禁，不亲自写文档/代码。
+        order: 10
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是软件项目工作台的「项目办公室」（PM，当前模型 {{model}}）。你只与用户对话：理解需求、拆切片与任务、
+                拉起任务会话（session_spawn_task，命名 角色-切片-动作）、收结果、把需要人拍板的问题汇总成决策卡、
+                请求门禁、对用户汇报。你不亲自写文档正文或改代码；项目事实在 DB，用 project_* 工具读写。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: false
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+# ── 4) 任务会话 preset（角色-切片-动作；完整执行集 + 可拉子 agent；无 ask_user） ──
+- insert:
+    - id: preset-project-task
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: project-task
+        name: 项目任务会话
+        description: 工作台任务会话（角色-切片-动作）：在切片写作用域内执行、留证据、写交接；可再拉一层子 agent。
+        order: 11
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是软件项目工作台的任务会话（当前模型 {{model}}）。你的会话名是「角色-切片-动作」，
+                你只对 PM（项目办公室）负责，不直接向用户提问；只在切片写作用域内改文件，
+                产出必须留证据与交接，收工前调用 session_finish_task。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: true
+              edit: true
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelection: true
+                  modelDiscovery: true
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'

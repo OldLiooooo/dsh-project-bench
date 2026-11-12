@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Project Workbench",
+    "description": "Project runtime for the workspace: SQLite fact store, document versions, task/session/decision timeline, project panel and tree cockpit."
+  }
+}

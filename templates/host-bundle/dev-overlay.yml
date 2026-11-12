@@ -1,0 +1,6 @@
+# 仅用于 `dsh web --patch <本文件>` 的本地调试 overlay。
+# 与 cordis.patch.yml 的区别：这里用绝对路径直接指向源码文件，不需要先安装成 bundle。
+# Windows 路径使用正斜杠即可被 Node 正常解析。
+- insert:
+    - id: my-host-plugin-dev
+      name: 'C:/Users/oldap/Documents/dsh-porject-bench/templates/host-bundle/index.js'

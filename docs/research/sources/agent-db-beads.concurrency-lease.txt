@@ -1,0 +1,400 @@
+== engdocs/design/dolt-concurrency.md (1-160) ==
+# Dolt Concurrency Model: Transaction-Based Shared Main
+
+> **Status**: Implemented — all-on-main is live, branch-per-worker retired
+> **Date**: 2026-02-22 (implemented 2026-02-24)
+> **Authors**: Steve Yegge
+> **Input**: Tim Sehn (Dolt co-founder), DoltHub blog 2026-02-18
+> **Scope**: Beads (primary), orchestrator (operational), Wasteland (federation)
+
+---
+
+## Problem Statement
+
+Beads is the universal data plane for multi-agent systems. Every agent role —
+workers, coordinators, observers, processors, patrols — reads and writes beads as their primary
+means of coordination. The Dolt concurrency model must serve **all** of them,
+not just individual workers.
+
+The system currently uses a **branch-per-worker** strategy for Dolt concurrency:
+workers get their own Dolt branches, write in isolation, and merge to main later.
+
+This was designed to eliminate optimistic lock contention between concurrent
+writers, and it works — 50 concurrent writers, 250 Dolt commits, 100% success
+rate in tests. But the concurrency wins are **illusory** because:
+
+1. **Workers can't see each other's beads.** A bead created by agent A is
+   invisible to agent B until A's branch merges to main. This breaks
+   cross-agent visibility for dispatching, dependency tracking, and status queries.
+
+2. **Shared state must live on main.** Beads is the coordination layer for the
+   entire system. Every role — workers doing tasks, coordinators dispatching, observers
+   monitoring, processors validating, assistants helping — needs the same view of
+   bead state. Branch isolation is the opposite of what a shared data plane
+   requires.
+
+3. **Merge-at-done introduces staleness.** Long-running agents accumulate
+   divergence. The merge at completion is a batch reconciliation point, not
+   a continuous shared view.
+
+4. **Branch proliferation.** Each sling creates a branch; cleanup relies on
+   `bd done` or branch cleanup. Orphaned branches accumulate. The
+   BD_BRANCH safety analysis (#1796) adds code complexity across the codebase.
+
+Tim Sehn's guidance (2026-02-21): **"It is far simpler to use one branch, so
+start there. You can get hundreds of transactions per second on a single
+branch. We fixed the bug you ran into."**
+
+## Tim's Key Insight
+
+> "I think you dolt commit every sql statement. If you don't you want to wrap
+> writes in a BEGIN and finish with a CALL DOLT_COMMIT(), ie in a transaction
+> otherwise connections will commit each other's writes."
+
+This identifies the core issue: without explicit SQL transactions, Dolt's
+auto-commit mode means **any connection can inadvertently commit another
+connection's uncommitted working set changes**. The fix is proper transaction
+boundaries.
+
+## Dolt Concurrency Architecture (Background)
+
+From the [DoltHub concurrency blog post](https://www.dolthub.com/blog/2026-02-18-dolt-concurrency/),
+Dolt has **two concurrency layers**:
+
+### Layer 1: SQL Transactions (MVCC)
+
+Standard SQL transaction semantics with a twist — conflict detection uses
+**three-way merge** against the branch HEAD, not row-level locking:
+
+- Different cells modified concurrently: **no conflict** (auto-merged)
+- Same cell updated to identical value: **no conflict**
+- Same cell updated to different values: **conflict** (must resolve)
+
+This is more permissive than traditional databases. Two agents updating
+different fields of the same bead will succeed without conflict.
+
+Isolation level: **repeatable read** (vulnerable to lost updates if two
+connections read-then-write the same cell).
+
+### Layer 2: Commit Graph (Serialized)
+
+Version control operations (`DOLT_COMMIT`, `DOLT_MERGE`, `DOLT_BRANCH`, etc.)
+acquire a **global lock**, execute atomically, then release. Merge work
+happens outside the lock; only final graph writes are serialized.
+
+Performance: **hundreds of commit graph operations per second** in normal
+operation. The global lock is planned to become per-branch but hasn't been
+a bottleneck in practice.
+
+### The Two Patterns
+
+**Pattern 1: Transaction-Wrapped Dolt Commits** (recommended for us)
+```sql
+BEGIN;
+INSERT INTO issues (id, title, status) VALUES ('gt-abc', 'Fix bug', 'open');
+INSERT INTO dependencies (issue_id, depends_on_id, type) VALUES ('gt-abc', 'gt-def', 'blocks');
+CALL DOLT_COMMIT('-Am', 'bd: create gt-abc');
+-- Transaction ends, changes are atomically visible
+```
+
+**Pattern 2: Branch-Per-Client** (our current approach — retiring)
+```sql
+CALL DOLT_BRANCH('worker-ace-1708642800');
+CALL DOLT_CHECKOUT('worker-ace-1708642800');
+-- Isolated writes, invisible to other agents
+-- Merge later
+```
+
+## Proposed Design: All-On-Main with Transaction Discipline
+
+### Principle
+
+All beads live on `main`. Concurrent access is managed through SQL transactions
+with explicit `DOLT_COMMIT` at transaction boundaries. No per-worker branches.
+
+### Transaction Semantics
+
+#### Rule 1: Every Write Group Gets a Transaction
+
+Every logical write operation (create bead, update status, close bead, add
+dependency, etc.) must be wrapped in `BEGIN` ... `CALL DOLT_COMMIT()`.
+
+```go
+// BEFORE (current): auto-commit per statement, no transaction boundary
+func (s *DoltStore) CreateIssue(ctx, issue, actor) {
+    s.db.Exec("INSERT INTO issues ...")  // auto-committed
+    // DOLT_COMMIT happens later via maybeAutoCommit()
+}
+
+// AFTER: explicit transaction with DOLT_COMMIT inside
+func (s *DoltStore) CreateIssue(ctx, issue, actor) {
+    tx, _ := s.db.BeginTx(ctx, nil)
+    tx.Exec("INSERT INTO issues ...")
+    tx.Exec("INSERT INTO labels ...")        // if applicable
+    tx.Exec("INSERT INTO dependencies ...")  // if applicable
+    tx.Exec("CALL DOLT_COMMIT('-Am', ?)", msg)
+    tx.Commit()
+}
+```
+
+This ensures:
+- All writes within a logical operation are **atomic**
+- No other connection can commit our uncommitted writes
+- The `DOLT_COMMIT` is part of the transaction, so it only includes our changes
+- If the transaction rolls back, no Dolt commit is created
+
+#### Rule 2: Read Operations Don't Need Transactions
+
+Simple reads (`SELECT` from `issues`, `dependencies`, etc.) can use bare
+connections. They'll see the latest committed state of main. Dolt's
+repeatable-read isolation means reads within a transaction see a consistent
+snapshot.
+
+#### Rule 3: Batch Mode Becomes Transaction-Scoped
+
+The current batch mode (accumulate changes, commit at a logical boundary)
+maps naturally to a long-lived transaction:
+
+```go
+// Batch: open transaction, do multiple writes, single DOLT_COMMIT at end
+tx.Begin()
+for _, issue := range issues {
+
+== docs/cli-reference/reclaim.md ==
+---
+title: "bd reclaim"
+description: "Revert stale-lease in_progress issues back to ready (dead-worker recovery)"
+---
+
+{/* AUTO-GENERATED: do not edit manually */}
+
+Generated from `bd help --doc reclaim`.
+
+Revert in_progress issues whose lease has gone stale back to ready.
+
+When a worker claims an issue it takes a lease that expires after a TTL, kept
+alive by 'bd heartbeat'. A worker that dies stops heartbeating, so its lease
+expires and its issue would otherwise stay in_progress forever. reclaim is the
+reaper: it finds in_progress issues whose lease expired more than --older-than
+ago, clears the assignee, and sets them back to open so another worker can
+claim them. The previous owner's stale lease is recorded as a recovery event.
+
+--older-than is a grace window past lease expiry: only leases that expired at
+least this long ago are reclaimed, so a worker briefly paused (GC, clock skew)
+is not robbed of live work. Run it from a supervisor on a timer with a window
+of roughly 2× the claim TTL.
+
+By default reclaim covers every stale lease THIS replica granted. The scope
+filters below narrow it further, using the same label surface claiming is
+scoped by (--label / --label-any / --exclude-label), plus --assignee and --id.
+Filters AND-combine and never widen the set: a reclaimed lease must still be
+stale.
+
+Replicas and leases (federated deployments)
+-------------------------------------------
+A lease is only meaningful on the replica that granted it. Every other
+replica's view of the holder's liveness is stale by up to one sync interval,
+so a reaper elsewhere can revert a unit that is very much alive over there.
+reclaim therefore records the granting replica on each lease and SKIPS a lease
+another replica granted, summarizing what it declined on stderr (one line per
+run; 'bd -v' expands it to the first 20 leases individually). Reap it where it
+was granted; use --any-replica only when that replica is permanently gone (or
+when this node was renamed and its own old leases now look foreign — an
+ordinary heartbeat keeps a lease alive but does not re-home it to the node
+heartbeating it). Prefer the narrow form '--any-replica --id &lt;id&gt;': bare
+--any-replica reverts EVERY foreign stale lease, live peers included.
+
+Two invariants the guard cannot enforce for you:
+
+  grace window &gt; sync interval, and lease TTL &gt; sync interval.
+
+A TTL or grace shorter than the cadence at which replicas exchange state is
+meaningless across the bridge — the remote view is a full interval old by
+construction. Raise the TTL/grace above the sync interval, never the reverse.
+The guard is opt-in: set BEADS_NODE_ID, or run 'bd config set node_id &lt;name&gt;'
+(which writes the per-machine ~/.config/bd/config.yaml — never commit a node_id
+to the git-tracked .beads/config.yaml, or every clone reads the same name and
+the guard goes armed-but-inert). One id per STORE, not per host: machines that
+are clients of the same dolt sql-server are ONE replica and must share one value
+or leave it unset. There is no hostname fallback — the hostname names the client
+process's machine, not the store — so an unnamed deployment keeps the old,
+unguarded behavior instead of stranding its own work.
+
+Examples:
+
+== docs/cli-reference/heartbeat.md ==
+---
+title: "bd heartbeat"
+description: "Refresh the lease on an issue you hold in_progress"
+---
+
+{/* AUTO-GENERATED: do not edit manually */}
+
+Generated from `bd help --doc heartbeat`.
+
+Refresh the lease on an issue you currently hold in_progress.
+
+A claim carries a lease that expires after a TTL. A worker keeps its claim alive
+by heartbeating faster than the TTL; once it stops (because it died), the lease
+goes stale and 'bd reclaim' reverts the issue to ready so another worker can pick
+it up. Heartbeat pushes lease_expires_at forward and stamps heartbeat_at = now.
+
+Only the current owner may heartbeat. If the lease has already been reclaimed or
+the issue closed, heartbeat fails so the worker learns to stop.
+
+Leases live in an ephemeral, node-local table: heartbeats write no Dolt commit
+and no history, so any cadence comfortably below the TTL is fine. Leases are
+only enforceable on the node that granted them; cross-machine claim visibility
+rides the issue's status and assignee, which do commit.
+
+Examples:
+  bd heartbeat bd-123
+  bd hb bd-123
+
+```
+bd heartbeat <id> [flags]
+```
+
+**Aliases:** hb
+
+== docs/multi-agent/coordination.md (claims/merge slot) ==
+---
+title: Agent Coordination
+description: Assign and claim beads, hand off work, and serialize conflict-prone work with merge slots across multiple agents
+---
+
+Patterns for coordinating work between multiple AI agents.
+
+## Work Assignment
+
+### Assigning and Claiming Work
+
+Assign work to a specific agent, or claim it atomically for yourself:
+
+```bash
+# Assign issue to an agent
+bd assign bd-42 agent-1
+
+# Atomically claim an issue (sets assignee to you, status to in_progress)
+bd update bd-42 --claim
+
+# Claim the first ready issue matching your filters
+bd ready --claim --json
+
+# Release a claimed issue
+bd assign bd-42 ""              # clear the assignee
+bd update bd-42 --status open   # make it claimable again
+```
+
+### Checking Assigned Work
+
+```bash
+# What is agent-1 working on?
+bd list --assignee agent-1 --status in_progress
+
+# What is ready for agent-1?
+bd ready --assignee agent-1
+
+# JSON output
+bd list --assignee agent-1 --json
+```
+
+## Handoff Patterns
+
+### Sequential Handoff
+
+Agent A completes work, hands off to Agent B:
+
+```bash
+# Agent A
+bd comment bd-42 "API complete, ready for review"
+bd assign bd-42 agent-b
+
+# Agent B picks up
+bd list --assignee agent-b  # Sees bd-42
+bd update bd-42 --claim
+```
+
+### Parallel Work
+
+Multiple agents work on different issues:
+
+```bash
+# Coordinator
+bd assign bd-42 agent-a
+bd assign bd-43 agent-b
+bd assign bd-44 agent-c
+
+# Each agent claims its issue and works independently
+bd update bd-42 --claim
+
+# Coordinator monitors progress
+bd list --status in_progress --json
+```
+
+### Fan-Out / Fan-In
+
+Split work, then merge:
+
+```bash
+# Fan-out
+bd create "Part A" --parent bd-epic
+bd create "Part B" --parent bd-epic
+bd create "Part C" --parent bd-epic
+
+bd assign bd-epic.1 agent-a
+bd assign bd-epic.2 agent-b
+bd assign bd-epic.3 agent-c
+
+# Fan-in: wait for all parts (one dependency per call)
+bd dep add bd-merge bd-epic.1
+bd dep add bd-merge bd-epic.2
+bd dep add bd-merge bd-epic.3
+```
+
+If `bd-epic` carries a size/effort label, see [Labels](/core-concepts/labels) for keeping it off the parts.
+
+<Tip>
+For structured epic fan-out, `bd swarm` creates and tracks a swarm molecule
+from an epic (`bd swarm create`, `bd swarm status`).
+</Tip>
+
+## Agent Discovery
+
+Beads has no agent registry — assignees are plain strings. To see which
+agents are active, group in-progress work by assignee:
+
+```bash
+bd list --status in_progress --json
+```
+
+## Conflict Prevention
+
+### Atomic Claims
+
+`--claim` is atomic: when multiple agents pull from the same ready queue,
+the first claim wins, and repeating a claim you already hold is idempotent.
+Prefer claiming over assigning when agents self-select work:
+
+```bash
+bd ready --claim --json
+```
+
+### Merge Slots
+
+Serialize conflict-prone work (such as merge-queue conflict resolution) with
+a merge slot — an exclusive-access primitive only one agent can hold at a
+time. Each project has one merge slot bead, named from the issue prefix
+(e.g. `bd-merge-slot`):
+
+```bash
+# Create the merge slot for this project
+bd merge-slot create
+
+# Check availability
+bd merge-slot check
+
+# Acquire before starting; release when done
+bd merge-slot acquire
+bd merge-slot release
+```

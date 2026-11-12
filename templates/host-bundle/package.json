@@ -1,0 +1,27 @@
+{
+  "name": "@local/my-host-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal DSH host plugin bundle skeleton.",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "engines": {
+    "dsh": ">=0.2.0"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

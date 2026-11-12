@@ -1,0 +1,20 @@
+corpus/1k/docs\auth\S8\session-keep-alive-0000746.md:30:- 回滚预案：切回上一版本并关闭 tokenRefresh，观察 fetchDocuments 指标 30 分钟。
+corpus/1k/docs\admin\S8\session-keep-alive-0000914.md:21:关于权限模型，当前实现见 services/notifications/queue-consumer.ts，其中 tokenRefresh 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\session-keep-alive-0000914.md:46:Benchmarks live in scripts/bench; sessionId is the hot path for tokenRefresh.
+corpus/1k/docs\admin\S8\session-keep-alive-0000914.md:51:- 待办：为权限模型补充监控告警，指标名统一使用 tokenRefresh_count。
+corpus/1k/docs\admin\S8\session-keep-alive-0000914.md:59:We cache tokenRefresh per tenant and invalidate via traceId.
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:17:迁移期间保持故障演练，services/notifications/queue-consumer.ts 中的 tokenRefresh 在旧版本下返回 E_TIMEOUT。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:25:Benchmarks live in scripts/bench; tokenRefresh is the hot path for rateLimiter.
+corpus/1k/docs\admin\S8\migration-rollback-0000496.md:19:- 回滚预案：切回上一版本并关闭 tokenRefresh，观察 traceId 指标 30 分钟。
+corpus/1k/docs\admin\S8\migration-rollback-0000496.md:28:- 2026-10-24 李萌：关于审计日志，当前实现见 src/search/query-parser.ts，其中 tokenRefresh 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\migration-rollback-0000496.md:47:线上问题复盘的根因是 tokenRefresh 未校验 parseFrontmatter，导致审计日志在高峰时段失效。
+corpus/1k/docs\auth\S8\cache-invalidation-0000093.md:25:- 线上问题复盘的根因是 tokenRefresh 未校验 parseFrontmatter，导致回滚在高峰时段失效。
+corpus/1k/docs\auth\S8\cache-invalidation-0000093.md:57:关于幂等设计，当前实现见 src/search/index-builder.ts，其中 tokenRefresh 负责合并重试与超时逻辑。
+corpus/1k/docs\auth\S8\cache-invalidation-0000093.md:66:关于缓存失效，当前实现见 src/search/index-builder.ts，其中 tokenRefresh 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\migration-rollback-0000294.md:41:- `tokenRefresh`：评审结论：监控告警需要补一条断言，覆盖 HTTP_429 与 traceId 同时缺失的路径。
+corpus/1k/docs\admin\S8\migration-rollback-0000294.md:69:- 回滚预案：切回上一版本并关闭 tokenRefresh，观察 idempotencyKey 指标 30 分钟。
+corpus/1k/docs\admin\S8\migration-rollback-0000294.md:79:normalizePath wraps tokenRefresh and retries once when E_RATE_LIMITED is observed.
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:19:The tokenRefresh helper normalises services/shipping/carrier-adapter.ts and strips the tenantId prefix.
+corpus/1k/docs\analytics\S8\session-keep-alive-0000178.md:26:- `errorCode`：线上问题复盘的根因是 tokenRefresh 未校验 tenantId，导致幂等设计在高峰时段失效。
+corpus/1k/docs\shipping\S8\cache-invalidation-0000818.md:24:- `retryPolicy`：线上问题复盘的根因是 tokenRefresh 未校验 sessionId，导致验收标准在高峰时段失效。
+corpus/1k/docs\admin\S8\canary-checklist-0000446.md:18:Benchmarks live in scripts/bench; tokenRefresh is the hot path for normalizePath.

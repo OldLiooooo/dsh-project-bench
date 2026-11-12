@@ -1,0 +1,3 @@
+- insert:
+    - id: poc-ui-probe
+      name: '@local/poc-ui-probe'

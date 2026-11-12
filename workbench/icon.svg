@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Project Workbench">
+  <rect x="2" y="2" width="20" height="20" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <path d="M6 8h5M6 12h8M6 16h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="17.5" cy="8" r="1.6" fill="currentColor"/>
+</svg>

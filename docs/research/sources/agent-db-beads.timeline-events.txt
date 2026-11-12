@@ -1,0 +1,214 @@
+== docs/reference/events-journal.md (22-100) ==
+## Which of the three event systems do you want?
+
+Beads has three things called events, and they answer different questions.
+
+| System | What it is | Reach for it when |
+|---|---|---|
+| **Script hooks** | Executable `on_create` / `on_update` / `on_close` scripts in `.beads/hooks/`, run after the mutation and fire-and-forget: asynchronous, output discarded, a failure neither blocks nor retries the write. | A side effect is nice to have — a chat ping, a cache bust — and losing one now and then is acceptable. |
+| **Audit history** | The per-issue trail behind `bd history <id> --events`: who changed what, when, with the old and new value of the field. | A person is asking who closed this bead, and when. |
+| **Events journal** | One workspace-wide, sequence-ordered stream of committed mutations, replayable from a checkpoint. | A machine is keeping its own copy of the graph in step. |
+
+## Turning it on
+
+```bash
+bd config set events-journal true      # this workspace, written to .beads/config.yaml
+BD_EVENTS_JOURNAL=1 bd close bd-a1b2   # or per process / operator-wide
+```
+
+Records are written only while the journal is enabled. Enabling it does not
+backfill what happened before, so a consumer starting today baselines from the
+workspace's current state (an [export](/cli-reference/export), or a full read)
+and follows the journal from there.
+
+<Warning>
+Turn it on wherever beads **writes**, not just where your consumer reads. The
+journal records the mutations made by the clone that made them, so a workspace
+whose writers never enabled it stays permanently empty — and an empty journal
+is indistinguishable from a caught-up one. Every writer of a workspace you
+intend to replay needs `events-journal: true` (or `BD_EVENTS_JOURNAL=1` in its
+environment), including agents, CI jobs, and a `bd serve` process. `bd events
+export` and `bd events tail` say so on stderr when the workspace they read is
+disabled; over HTTP the same condition is a `409`.
+</Warning>
+
+| Key | Default | Effect |
+|---|---|---|
+| `events-journal` | `false` | Master switch. Off costs nothing; on costs one snapshot write per mutation. |
+| `events-journal-retain-days` | `7` | Keep every record younger than this many days. `0` disables the floor. |
+| `events-journal-retain-rows` | `100000` | Always keep this many newest records. `0` disables the floor. |
+| `events-journal-auto-prune` | `true` | Enforce the floors automatically. `false` leaves deletion to `bd events prune`. |
+
+The floors bound both prunes: the automatic one and `bd events prune`. See
+[Retention and pruning](#retention-and-pruning).
+
+All four are startup settings kept in `config.yaml` rather than database config,
+and each has an environment equivalent: `BD_EVENTS_JOURNAL`,
+`BD_EVENTS_JOURNAL_RETAIN_DAYS`, `BD_EVENTS_JOURNAL_RETAIN_ROWS`,
+`BD_EVENTS_JOURNAL_AUTO_PRUNE`.
+
+## Reading it
+
+```bash
+bd events tail --since 0                # every retained record, oldest first
+bd events tail --since 4211             # resume from a checkpoint
+bd events tail --since 4211 --follow    # ...and keep printing as writes commit (polls once a second; Ctrl-C to stop)
+bd events tail --since 4211 --follow --exit-on-stdin-eof # also stop when a caller-owned stdin pipe closes
+bd events tail --since 4211 --limit 100 # cap one batch
+bd events export                        # the whole journal from seq 1 — same as --since 0
+```
+
+Output is JSON Lines, one record per line, in sequence order:
+
+```json
+{"seq":1,"ts":"2026-01-02T03:04:05Z","op":"create","issue_id":"bd-100","actor":"worker-1","issue":{"id":"bd-100","title":"wire the seam","status":"open","priority":1,"issue_type":"task","created_at":"2026-01-02T03:00:00Z","updated_at":"2026-01-02T03:04:05Z"}}
+{"seq":4,"ts":"2026-01-02T03:04:05Z","op":"update","issue_id":"bd-100","issue":{"id":"bd-100","title":"wire the seam","status":"open","priority":1,"issue_type":"task","is_blocked":true,"created_at":"2026-01-02T03:00:00Z","updated_at":"2026-01-02T03:04:05Z"}}
+{"seq":11,"ts":"2026-01-02T03:04:05Z","op":"delete","issue_id":"bd-100","issue":null}
+```
+
+A consumer advances its checkpoint to the highest `seq` it has durably
+processed, and passes that as the next `--since`.
+
+Desktop and editor integrations whose own process lifetime is not guaranteed
+to clean up child processes can combine `--follow --exit-on-stdin-eof` and pass
+the follower a pipe as stdin. Closing the parent side makes the follower exit
+even when the workspace is quiet. Without the opt-in flag, stdin is ignored and
+the existing Ctrl-C/output-error behavior is unchanged.
+
+### Over HTTP
+
+A consumer that already talks to a workspace over `bd serve` reads the same
+
+== events-journal.md (247-330 record contract) ==
+## The record contract
+
+| Field | Type | Meaning |
+|---|---|---|
+| `seq` | integer | Assigned inside the mutation's transaction. Gapless, strictly increasing in commit order, never reused and never reset. A rolled-back write burns no sequence number. |
+| `ts` | string | UTC insert time, stamped inside the committing transaction. |
+| `op` | string | One of the seven operations below. |
+| `issue_id` | string | The mutated issue. |
+| `actor` | string | The acting identity that performed the mutation, as resolved for the audit-events table; on a `comment` row, the comment's author. A `delete` and the `dep_remove` records a cascading delete produces carry the identity that *requested* the delete, not the beads the cascade reached. Absent when the path genuinely has no actor — derived maintenance (`is_blocked` recomputes), system cleanup with no request behind it, and rows written before the journal recorded actors. An absent `actor` is never user attribution: read it as "system/unknown", not as a conflicting writer. |
+| `issue` | object or null | The issue's full state *after* the mutation; `null` on a delete. |
+| `dep` | object | `{"kind","target","metadata"}` on `dep_add` and `dep_remove`; absent otherwise. |
+| `comment` | object | `{"id","author","text","created_at","source"}` on `comment`; absent otherwise. |
+
+Six operations are the public vocabulary — the only kinds a downstream event
+feed built on the journal may carry:
+
+| `op` | Recorded when |
+|---|---|
+| `create` | A bead (or wisp) is created. |
+| `update` | Any field, label, metadata, claim, unclaim, lease reclaim, promote, defer wake, or derived `is_blocked` flip changes the bead. |
+| `close` | A bead is closed. A reopen is an `update`. |
+| `delete` | A bead is removed. |
+| `dep_add` | A [dependency](/core-concepts/dependencies) edge is written. |
+| `dep_remove` | A dependency edge is removed. |
+
+An id rename has no operation of its own. It replays as the operations a
+consumer can apply without understanding identity changes: the old edges
+removed, the old id deleted, the new id created, the edges re-added under it.
+
+A seventh operation, `comment`, is journaled too. Its `comment` member is the
+replayable payload, and `comment.source` is a closed two-value set:
+`structured` for a comment someone wrote, `audit` for a comment recorded as an
+audit-trail entry.
+
+```json
+{"id":"cmt-1","author":"worker-1","text":"picked this up","created_at":"2026-01-02T03:04:05Z","source":"structured"}
+```
+
+Anything projecting the journal outward as a public event feed *skips* a
+`comment` record rather than faulting on it — the write is already visible in
+the issue snapshot beside it.
+
+### The issue snapshot
+
+`issue` is the bead's own row plus its labels plus `is_blocked` — the persisted
+readiness projection, included so a dependency change replays without
+recomputing the graph. It never inlines dependencies or comments; those arrive
+as their own `dep_*` and `comment` records.
+
+It is `null` on a `delete`, and on a dependency record whose source bead was
+itself removed by the same cascade.
+
+A snapshot of a wisp-plane bead carries its `arrival_seq` — see [Arrival order
+on the row](#arrival-order-on-the-row).
+
+### Dependency records are not symmetric
+
+A `dep` member names the edge that changed:
+
+```json
+{"kind":"blocks","target":"bd-100","metadata":""}
+```
+
+**In count.** A `dep_add` is recorded for every accepted add, *including* an
+idempotent same-type re-add that only refreshes the edge's metadata. The audit
+history deduplicates that case and writes nothing; the journal does not. Treat
+`dep_add` as an upsert of the edge, never as proof the edge is new. A
+`dep_remove` naming an edge that is already gone records nothing at all.
+
+**In payload.** `dep.metadata` differs in provenance between the two. On a
+`dep_add` it is the value being written, exactly as the caller supplied it; on
+a `dep_remove` it is the stored column read back just before the delete. The
+two can differ byte for byte while meaning the same thing, so compare parsed
+values rather than strings.
+
+## Arrival order on the row
+
+A consumer that falls behind the retained window re-baselines from rows, and
+rows alone do not say in what order they were created: `created_at` is the
+writer's clock at insert time, at one-second precision, so two creates that
+committed in one order can carry the same timestamp or the reverse. The journal
+therefore leaves its ordering on the row itself.
+
+A wisp-plane bead (`ephemeral` or `no_history`) created while the workspace
+
+== docs/reference/git-integration.md hooks table ==
+runtime files out of git — no manual gitignore rules are needed. Never track
+the database directory (`.beads/embeddeddolt/` or `.beads/dolt/`) in git or
+via Git LFS.
+
+## Git Hooks
+
+### Installation
+
+`bd init` installs hooks by default (skip with `bd init --skip-hooks`). To
+install or refresh them manually:
+
+```bash
+bd hooks install
+```
+
+Installed hooks are thin shims that call `bd hooks run <hook-name>`. Upgrading
+`bd` automatically updates the delegated behavior inside that command; the
+shim's generated shell policy remains installed content and changes only when
+the hook is installed or refreshed:
+
+| Hook | What it does |
+|------|--------------|
+| `pre-commit` | Runs chained hooks; when `export.auto` is enabled, exports `.beads/issues.jsonl` so it lands in the same commit |
+| `post-merge` | Runs chained hooks; imports JSONL only as a legacy fallback when no Dolt remote is configured — with `sync.remote` set, `bd dolt pull` is the canonical sync |
+| `pre-push` | Runs chained hooks before push |
+| `post-checkout` | Runs chained hooks after branch checkout |
+| `prepare-commit-msg` | Adds an `Executed-By:` agent identity trailer when an agent (`BD_ACTOR`) makes the commit |
+
+The shims use section markers to coexist with existing hooks — content
+outside the markers is preserved across installs and upgrades. Install
+variants:
+
+```bash
+bd hooks install --beads    # Install to .beads/hooks/ (recommended for the Dolt backend)
+bd hooks install --shared   # Install to .beads-hooks/ (versioned, shareable with the team)
+bd hooks install --chain    # Run existing hooks before bd hooks
+```
+
+Hook installation is worktree-aware: `bd` resolves the shared git directory,
+so installing from a linked worktree works.
+
+In releases after v1.3.2, `bd hooks install` (and the hook install `bd init`
+runs) refuses a hooks directory that is itself a symlink, including a dangling
+one, in every mode: `.git/hooks`, a `core.hooksPath` directory, `.beads-hooks/`
+and `.beads/hooks/`. It refuses before copying existing hooks, writing any
+hook, or changing `core.hooksPath`, because each write would land in the

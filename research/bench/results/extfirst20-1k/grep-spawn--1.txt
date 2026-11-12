@@ -1,0 +1,7 @@
+grep (WinuxCmd) 1.2.1
+Copyright (C) 2026 WinuxCmd
+License MIT <https://opensource.org/license/mit>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by WinuxCmd contributors.

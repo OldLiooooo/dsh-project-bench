@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Host Plugin Skeleton",
+    "description": "Minimal DSH host plugin bundle skeleton. Replace this title and description with the real capability before installing for others."
+  }
+}

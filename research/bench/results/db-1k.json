@@ -1,0 +1,196 @@
+{
+  "tier": "1k",
+  "docs": 1000,
+  "changes": 2640,
+  "corpusBytes": 3141167,
+  "corpusBytesPerDoc": 3141.167,
+  "parseMs": 70.7565,
+  "walkMs": 20.819100000000002,
+  "variants": {
+    "meta": {
+      "file": "C:\\Users\\oldap\\Documents\\dsh-porject-bench\\research\\bench\\db\\meta-1k.db",
+      "sizeBytes": 1110016,
+      "buildMs": 23.18140000000001,
+      "totalMs": 31.888700000000014,
+      "phases": {
+        "insertDocsMs": 4.568400000000011,
+        "insertChangesMs": 4.608700000000013,
+        "ftsUniMs": 0,
+        "ftsTriMs": 0,
+        "indexesMs": 11.957599999999985,
+        "vacuumMs": 8.707300000000004
+      },
+      "dbstat": {
+        "changes": 417792,
+        "docs": 274432,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "sqlite_schema": 4096
+      },
+      "ftsRows": null,
+      "tables": {
+        "docs": 1000,
+        "changes": 2640
+      }
+    },
+    "full": {
+      "file": "C:\\Users\\oldap\\Documents\\dsh-porject-bench\\research\\bench\\db\\full-1k.db",
+      "sizeBytes": 5025792,
+      "buildMs": 33.44630000000001,
+      "totalMs": 65.83280000000002,
+      "phases": {
+        "insertDocsMs": 13.865800000000007,
+        "insertChangesMs": 4.8563000000000045,
+        "ftsUniMs": 0,
+        "ftsTriMs": 0,
+        "indexesMs": 13.07680000000002,
+        "vacuumMs": 32.38650000000001
+      },
+      "dbstat": {
+        "docs": 4190208,
+        "changes": 417792,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "sqlite_schema": 4096
+      },
+      "ftsRows": null,
+      "tables": {
+        "docs": 1000,
+        "changes": 2640
+      }
+    },
+    "full_uni": {
+      "file": "C:\\Users\\oldap\\Documents\\dsh-porject-bench\\research\\bench\\db\\full_uni-1k.db",
+      "sizeBytes": 6131712,
+      "buildMs": 71.17490000000001,
+      "totalMs": 112.05860000000004,
+      "phases": {
+        "insertDocsMs": 13.702300000000008,
+        "insertChangesMs": 4.942800000000005,
+        "ftsUniMs": 35.89920000000001,
+        "ftsTriMs": 0,
+        "indexesMs": 13.703700000000026,
+        "vacuumMs": 40.88370000000003
+      },
+      "dbstat": {
+        "docs": 4190208,
+        "fts_uni_data": 1081344,
+        "changes": 417792,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "fts_uni_docsize": 16384,
+        "sqlite_schema": 4096,
+        "fts_uni_idx": 4096,
+        "fts_uni_config": 4096
+      },
+      "ftsRows": 1000,
+      "tables": {
+        "docs": 1000,
+        "changes": 2640
+      }
+    },
+    "full_uni_tri": {
+      "file": "C:\\Users\\oldap\\Documents\\dsh-porject-bench\\research\\bench\\db\\full_uni_tri-1k.db",
+      "sizeBytes": 14266368,
+      "buildMs": 208.9246,
+      "totalMs": 298.835,
+      "phases": {
+        "insertDocsMs": 14.476699999999994,
+        "insertChangesMs": 5.1375000000000455,
+        "ftsUniMs": 33.60430000000002,
+        "ftsTriMs": 138.20890000000003,
+        "indexesMs": 13.379000000000019,
+        "vacuumMs": 89.91039999999998
+      },
+      "dbstat": {
+        "fts_tri_data": 8081408,
+        "docs": 4190208,
+        "fts_uni_data": 1081344,
+        "changes": 417792,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "fts_tri_idx": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "fts_uni_docsize": 16384,
+        "fts_tri_docsize": 16384,
+        "sqlite_schema": 4096,
+        "fts_uni_idx": 4096,
+        "fts_uni_config": 4096,
+        "fts_tri_config": 4096
+      },
+      "ftsRows": 1000,
+      "tables": {
+        "docs": 1000,
+        "changes": 2640
+      }
+    },
+    "idxonly_uni_tri": {
+      "file": "C:\\Users\\oldap\\Documents\\dsh-porject-bench\\research\\bench\\db\\idxonly_uni_tri-1k.db",
+      "sizeBytes": 10350592,
+      "buildMs": 214.79779999999994,
+      "totalMs": 278.8522999999999,
+      "phases": {
+        "insertDocsMs": 3.9413000000000693,
+        "insertChangesMs": 5.3396999999999935,
+        "ftsUniMs": 36.175199999999904,
+        "ftsTriMs": 151.61540000000002,
+        "indexesMs": 12.964799999999968,
+        "vacuumMs": 64.05449999999996
+      },
+      "dbstat": {
+        "fts_tri_c_data": 8081408,
+        "fts_uni_c_data": 1081344,
+        "changes": 417792,
+        "docs": 274432,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "fts_tri_c_idx": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "fts_uni_c_docsize": 16384,
+        "fts_tri_c_docsize": 16384,
+        "sqlite_schema": 4096,
+        "fts_uni_c_idx": 4096,
+        "fts_uni_c_config": 4096,
+        "fts_tri_c_config": 4096
+      },
+      "ftsRows": 1000,
+      "tables": {
+        "docs": 1000,
+        "changes": 2640
+      }
+    }
+  }
+}

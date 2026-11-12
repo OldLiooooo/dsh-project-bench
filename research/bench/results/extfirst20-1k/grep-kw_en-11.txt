@@ -1,0 +1,20 @@
+corpus/1k/docs/shipping/S8/canary-checklist-0000134.md:43:迁移期间保持灰度发布，packages/db/migrations/0007_docs.sql 中的 normalizePath 在旧版本下返回 ERR_503。
+corpus/1k/docs/shipping/S8/canary-checklist-0000134.md:51:- `requestId`：压测显示 normalizePath 在 S8 阶段出现抖动，需要复核权限模型与灰度发布。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:46:- 降级策略：normalizePath 失败时降级为同步调用，错误码统一为 invalid_grant。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:48:- `invalid_grant`：线上问题复盘的根因是 normalizePath 未校验 paymentsRetry，导致缓存失效在高峰时段失效。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:41:We cache sessionId per tenant and invalidate via normalizePath.
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:56:The userId field is validated by normalizePath before the request reaches infra/terraform/modules/redis/main.tf.
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:16:- 迁移期间保持监控告警，services/auth/session-store.ts 中的 normalizePath 在旧版本下返回 ERR_401。
+corpus/1k/docs/shipping/S7/error-taxonomy-0000346.md:31:The normalizePath helper normalises services/notifications/queue-consumer.ts and strips the errorCode prefix.
+corpus/1k/docs/shipping/S7/retry-policy-0000479.md:44:- 降级策略：normalizePath 失败时降级为同步调用，错误码统一为 ERR_503。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:18:- 2026-01-25 李萌：线上问题复盘的根因是 idempotencyKey 未校验 normalizePath，导致错误码约定在高峰时段失效。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:21:设计取舍：把错误码约定收敛到网关层，业务侧仅依赖 normalizePath 与 E_NOT_FOUND。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:31:评审结论：错误码约定需要补一条断言，覆盖 E_DEGRADED 与 normalizePath 同时缺失的路径。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:39:- 2026-04-15 李萌：线上问题复盘的根因是 buildIndex 未校验 normalizePath，导致错误码约定在高峰时段失效。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:44:The normalizePath field is validated by segmentSize before the request reaches services/billing/invoice-renderer.ts.
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:45:- 关于权限模型，当前实现见 src/api/middleware/rate-limiter.ts，其中 normalizePath 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:54:待办：为错误码约定补充监控告警，指标名统一使用 normalizePath_count。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:60:- 线上问题复盘的根因是 tenantId 未校验 normalizePath，导致错误码约定在高峰时段失效。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:63:- 2026-11-08 Alice Chen：评审结论：错误码约定需要补一条断言，覆盖 E_DEGRADED 与 normalizePath 同时缺失的路径。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:64:We cache writeAheadLog per tenant and invalidate via normalizePath.
+corpus/1k/docs/shipping/S7/session-keep-alive-0000784.md:70:| normalizePath | string | 幂等设计 |

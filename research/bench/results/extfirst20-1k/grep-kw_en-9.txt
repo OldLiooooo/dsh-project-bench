@@ -1,0 +1,20 @@
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:20:关于状态机，当前实现见 services/shipping/carrier-adapter.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:55:We cache sessionId per tenant and invalidate via cacheInvalidate.
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:16:Callers must set paymentsRetry and userId; otherwise cacheInvalidate rejects the payload with ERR_401.
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:43:- `idempotencyKey`：线上问题复盘的根因是 cacheInvalidate 未校验 tenantId，导致回滚预案在高峰时段失效。
+corpus/1k/docs/shipping/S7/cache-invalidation-0000457.md:64:- 2026-09-04 孙博文：迁移期间保持灰度发布，services/shipping/carrier-adapter.ts 中的 cacheInvalidate 在旧版本下返回 E_RATE_LIMITED。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:15:- 2026-04-18 张若彤：线上问题复盘的根因是 cacheInvalidate 未校验 sessionId，导致回滚预案在高峰时段失效。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:22:压测显示 cacheInvalidate 在 S7 阶段出现抖动，需要复核超时重试与权限模型。
+corpus/1k/docs/shipping/S7/migration-rollback-0000745.md:60:- `cacheInvalidate`：运维要求：缓存失效必须有可回滚的开关，相关脚本在 services/notifications/queue-consumer.ts。
+corpus/1k/docs/shipping/S7/migration-rollback-0000962.md:31:loadModule wraps cacheInvalidate and retries once when invalid_grant is observed.
+corpus/1k/docs/shipping/S7/retry-policy-0000479.md:45:- `errorCode`：压测显示 cacheInvalidate 在 S7 阶段出现抖动，需要复核幂等设计与验收标准。
+corpus/1k/docs/shipping/S7/retry-policy-0000479.md:56:关于回滚预案，当前实现见 src/api/middleware/rate-limiter.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S7/session-keep-alive-0000394.md:31:- 关于迁移脚本，当前实现见 services/notifications/queue-consumer.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S6/cache-invalidation-0000822.md:18:迁移期间保持限流策略，infra/terraform/modules/redis/main.tf 中的 cacheInvalidate 在旧版本下返回 E_TIMEOUT。
+corpus/1k/docs/shipping/S6/cache-invalidation-0000822.md:24:The userId field is validated by cacheInvalidate before the request reaches packages/core/utils/normalize-path.ts.
+corpus/1k/docs/shipping/S6/cache-invalidation-0000822.md:28:traceId wraps cacheInvalidate and retries once when SQLITE_BUSY is observed.
+corpus/1k/docs/shipping/S6/cache-invalidation-0000822.md:63:- 迁移期间保持迁移脚本，packages/db/migrations/0007_docs.sql 中的 cacheInvalidate 在旧版本下返回 SQLITE_BUSY。
+corpus/1k/docs/shipping/S6/canary-checklist-0000046.md:22:parseFrontmatter wraps cacheInvalidate and retries once when E_TIMEOUT is observed.
+corpus/1k/docs/shipping/S6/canary-checklist-0000651.md:54:- `cacheInvalidate`：压测显示 sessionId 在 S6 阶段出现抖动，需要复核迁移脚本与灰度发布。
+corpus/1k/docs/shipping/S6/error-taxonomy-0000624.md:24:- 关于容量评估，当前实现见 src/admin/audit-log.ts，其中 cacheInvalidate 负责合并重试与超时逻辑。
+corpus/1k/docs/shipping/S6/migration-rollback-0000185.md:17:设计取舍：把幂等设计收敛到网关层，业务侧仅依赖 cacheInvalidate 与 invalid_grant。

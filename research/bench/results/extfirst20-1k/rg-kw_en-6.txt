@@ -1,0 +1,20 @@
+corpus/1k/docs\admin\S1\error-taxonomy-0000218.md:37:- `parseFrontmatter`：关于会话保持，当前实现见 services/billing/invoice-renderer.ts，其中 retryPolicy 负责合并重试与超时逻辑。
+corpus/1k/docs\auth\S8\session-keep-alive-0000746.md:18:- 2026-02-18 吴嘉豪：关于验收标准，当前实现见 services/shipping/carrier-adapter.ts，其中 retryPolicy 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S1\cache-invalidation-0000430.md:15:- [ ] 验收标准：retryPolicy 缺省时返回 ERR_401，且不产生副作用。
+corpus/1k/docs\admin\S1\cache-invalidation-0000430.md:26:- 2026-07-16 Marco Li：设计取舍：把会话保持收敛到网关层，业务侧仅依赖 retryPolicy 与 E_CONFLICT。
+corpus/1k/docs\auth\S8\error-taxonomy-0000045.md:38:压测显示 retryPolicy 在 S8 阶段出现抖动，需要复核错误码约定与降级策略。
+corpus/1k/docs\auth\S8\error-taxonomy-0000045.md:40:retryPolicy wraps requestId and retries once when HTTP_429 is observed.
+corpus/1k/docs\admin\S8\cache-invalidation-0000965.md:68:The requestId field is validated by retryPolicy before the request reaches packages/db/migrations/0007_docs.sql.
+corpus/1k/docs\auth\S8\canary-checklist-0000360.md:18:The retryPolicy field is validated by userId before the request reaches app/mobile/session-keepalive.ts.
+corpus/1k/docs\auth\S8\canary-checklist-0000360.md:25:设计取舍：把权限模型收敛到网关层，业务侧仅依赖 retryPolicy 与 HTTP_429。
+corpus/1k/docs\admin\S8\cache-invalidation-0000706.md:39:We cache buildIndex per tenant and invalidate via retryPolicy.
+corpus/1k/docs\admin\S8\cache-invalidation-0000706.md:69:线上问题复盘的根因是 retryPolicy 未校验 ERR_503，导致故障演练在高峰时段失效。
+corpus/1k/docs\admin\S8\cache-invalidation-0000706.md:70:- 2026-08-26 王一帆：关于权限模型，当前实现见 packages/core/utils/normalize-path.ts，其中 retryPolicy 负责合并重试与超时逻辑。
+corpus/1k/docs\admin\S8\migration-rollback-0000496.md:27:- 回滚预案：切回上一版本并关闭 retryPolicy，观察 traceId 指标 30 分钟。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:21:- 本模块在 S8 阶段的核心约束是兼容性：retryPolicy 必须由调用方显式传入，缺失时返回 E_CONFLICT。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:45:- `buildIndex`：线上问题复盘的根因是 invalid_grant 未校验 retryPolicy，导致权限模型在高峰时段失效。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:46:迁移期间保持限流策略，src/payments/retry-policy.ts 中的 retryPolicy 在旧版本下返回 E_RATE_LIMITED。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:48:待办：为权限模型补充监控告警，指标名统一使用 retryPolicy_count。
+corpus/1k/docs\admin\S8\retry-policy-0000659.md:57:- 2026-01-22 王一帆：设计取舍：把限流策略收敛到网关层，业务侧仅依赖 retryPolicy 与 invalid_grant。
+corpus/1k/docs\admin\S8\migration-rollback-0000294.md:76:We cache idempotencyKey per tenant and invalidate via retryPolicy.
+corpus/1k/docs\admin\S8\canary-checklist-0000913.md:26:- 线上问题复盘的根因是 retryPolicy 未校验 tenantId，导致回滚预案在高峰时段失效。

@@ -1,0 +1,1675 @@
+{
+  "tier": "1k",
+  "docs": 1000,
+  "generatedAt": "2026-11-11T10:29:41.121Z",
+  "rounds": 3,
+  "pragma": {
+    "pageSize": 4096,
+    "journalMode": "delete",
+    "cacheSize": -65536
+  },
+  "dbSizes": {
+    "meta": {
+      "sizeBytes": 1110016,
+      "buildMs": 23.18140000000001,
+      "dbstat": {
+        "changes": 417792,
+        "docs": 274432,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "sqlite_schema": 4096
+      }
+    },
+    "full": {
+      "sizeBytes": 5025792,
+      "buildMs": 33.44630000000001,
+      "dbstat": {
+        "docs": 4190208,
+        "changes": 417792,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "sqlite_schema": 4096
+      }
+    },
+    "full_uni": {
+      "sizeBytes": 6131712,
+      "buildMs": 71.17490000000001,
+      "dbstat": {
+        "docs": 4190208,
+        "fts_uni_data": 1081344,
+        "changes": 417792,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "fts_uni_docsize": 16384,
+        "sqlite_schema": 4096,
+        "fts_uni_idx": 4096,
+        "fts_uni_config": 4096
+      }
+    },
+    "full_uni_tri": {
+      "sizeBytes": 14266368,
+      "buildMs": 208.9246,
+      "dbstat": {
+        "fts_tri_data": 8081408,
+        "docs": 4190208,
+        "fts_uni_data": 1081344,
+        "changes": 417792,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "fts_tri_idx": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "fts_uni_docsize": 16384,
+        "fts_tri_docsize": 16384,
+        "sqlite_schema": 4096,
+        "fts_uni_idx": 4096,
+        "fts_uni_config": 4096,
+        "fts_tri_config": 4096
+      }
+    },
+    "idxonly_uni_tri": {
+      "sizeBytes": 10350592,
+      "buildMs": 214.79779999999994,
+      "dbstat": {
+        "fts_tri_c_data": 8081408,
+        "fts_uni_c_data": 1081344,
+        "changes": 417792,
+        "docs": 274432,
+        "sqlite_autoindex_docs_1": 126976,
+        "idx_changes_module_date": 77824,
+        "idx_changes_date": 53248,
+        "idx_docs_module_date": 32768,
+        "idx_changes_doc": 32768,
+        "fts_tri_c_idx": 32768,
+        "idx_docs_module_stage": 24576,
+        "idx_docs_date": 24576,
+        "idx_docs_ticket": 20480,
+        "idx_docs_author": 20480,
+        "fts_uni_c_docsize": 16384,
+        "fts_tri_c_docsize": 16384,
+        "sqlite_schema": 4096,
+        "fts_uni_c_idx": 4096,
+        "fts_uni_c_config": 4096,
+        "fts_tri_c_config": 4096
+      }
+    }
+  },
+  "categories": {
+    "kw_en": {
+      "queries": [
+        "sessionId",
+        "userId",
+        "tenantId",
+        "requestId",
+        "traceId",
+        "loadModule",
+        "retryPolicy",
+        "tokenRefresh",
+        "paymentsRetry",
+        "cacheInvalidate",
+        "rateLimiter",
+        "normalizePath",
+        "fetchDocuments",
+        "parseFrontmatter",
+        "buildIndex",
+        "errorCode",
+        "ERR_401",
+        "ERR_503",
+        "E_TIMEOUT",
+        "SQLITE_BUSY"
+      ],
+      "backends": {
+        "sqlite_like": {
+          "cold": {
+            "n": 20,
+            "p50": 0.7817000000000007,
+            "p95": 1.0848000000000013,
+            "mean": 0.8269499999999976,
+            "min": 0.6686000000000121,
+            "max": 1.2353999999999985
+          },
+          "warm": {
+            "n": 60,
+            "p50": 0.294399999999996,
+            "p95": 0.3867999999999938,
+            "mean": 0.30832666666665937,
+            "min": 0.2300999999999931,
+            "max": 0.5765999999999849
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 9739,
+            "p95": 9942,
+            "mean": 9689.55,
+            "min": 9233,
+            "max": 9986
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 2891,
+            "p95": 2967,
+            "mean": 2878.15,
+            "min": 2716,
+            "max": 2984
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            599,
+            603,
+            608,
+            599,
+            590,
+            561,
+            558,
+            575,
+            562,
+            577,
+            554,
+            558,
+            583,
+            575,
+            596,
+            589,
+            705,
+            690,
+            712,
+            720
+          ],
+          "hitCountMedian": 589,
+          "errors": []
+        },
+        "fts_uni": {
+          "cold": {
+            "n": 20,
+            "p50": 2.1829999999999927,
+            "p95": 2.5301000000000045,
+            "mean": 2.200095,
+            "min": 1.7897999999999996,
+            "max": 2.65979999999999
+          },
+          "warm": {
+            "n": 60,
+            "p50": 1.5748000000000104,
+            "p95": 2.05540000000002,
+            "mean": 1.6128099999999956,
+            "min": 1.3297999999999774,
+            "max": 2.1604999999999563
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 8761,
+            "p95": 9073,
+            "mean": 8695.15,
+            "min": 8106,
+            "max": 9422
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 2552,
+            "p95": 2647,
+            "mean": 2526.25,
+            "min": 2327,
+            "max": 2755
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            599,
+            603,
+            608,
+            599,
+            590,
+            561,
+            558,
+            575,
+            562,
+            577,
+            554,
+            558,
+            583,
+            575,
+            596,
+            589,
+            705,
+            690,
+            712,
+            720
+          ],
+          "hitCountMedian": 589,
+          "errors": []
+        },
+        "fts_tri": {
+          "cold": {
+            "n": 20,
+            "p50": 3.3474000000000075,
+            "p95": 4.079799999999992,
+            "mean": 3.383884999999998,
+            "min": 2.5690000000000026,
+            "max": 4.1422000000000025
+          },
+          "warm": {
+            "n": 60,
+            "p50": 2.282699999999977,
+            "p95": 3.050199999999961,
+            "mean": 2.348503333333332,
+            "min": 1.704100000000011,
+            "max": 3.5049999999999955
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 5302,
+            "p95": 5385,
+            "mean": 5304.6,
+            "min": 5201,
+            "max": 5402
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 1479,
+            "p95": 1509,
+            "mean": 1481.2,
+            "min": 1444,
+            "max": 1515
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            599,
+            603,
+            608,
+            599,
+            590,
+            561,
+            558,
+            575,
+            562,
+            577,
+            554,
+            558,
+            583,
+            575,
+            596,
+            589,
+            705,
+            690,
+            712,
+            720
+          ],
+          "hitCountMedian": 589,
+          "errors": []
+        },
+        "fts_tri_like": {
+          "cold": {
+            "n": 20,
+            "p50": 2.004599999999982,
+            "p95": 2.521799999999999,
+            "mean": 2.084379999999996,
+            "min": 1.7039000000000044,
+            "max": 2.561
+          },
+          "warm": {
+            "n": 60,
+            "p50": 1.1819999999999595,
+            "p95": 1.401200000000017,
+            "mean": 1.1826316666666699,
+            "min": 0.8854000000000042,
+            "max": 1.5925000000000296
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 5287,
+            "p95": 5341,
+            "mean": 5280.55,
+            "min": 5138,
+            "max": 5418
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 1479,
+            "p95": 1497,
+            "mean": 1476.25,
+            "min": 1428,
+            "max": 1522
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            599,
+            603,
+            608,
+            599,
+            590,
+            561,
+            558,
+            575,
+            562,
+            577,
+            554,
+            558,
+            583,
+            575,
+            596,
+            589,
+            705,
+            690,
+            712,
+            720
+          ],
+          "hitCountMedian": 589,
+          "errors": []
+        },
+        "rg": {
+          "cold": {
+            "n": 1,
+            "p50": 41.326,
+            "p95": 41.326,
+            "mean": 41.326,
+            "min": 41.326,
+            "max": 41.326
+          },
+          "warm": {
+            "n": 3,
+            "p50": 42.017,
+            "p95": 43.186,
+            "mean": 41.84766666666667,
+            "min": 40.34,
+            "max": 43.186
+          },
+          "payloadBytes": {
+            "n": 1,
+            "p50": 0,
+            "p95": 0,
+            "mean": 0,
+            "min": 0,
+            "max": 0
+          },
+          "payloadTokens": {
+            "n": 1,
+            "p50": 0,
+            "p95": 0,
+            "mean": 0,
+            "min": 0,
+            "max": 0
+          },
+          "payloadRows": {
+            "n": 1,
+            "p50": 0,
+            "p95": 0,
+            "mean": 0,
+            "min": 0,
+            "max": 0
+          },
+          "payloadFirst20Bytes": {
+            "n": 1,
+            "p50": 0,
+            "p95": 0,
+            "mean": 0,
+            "min": 0,
+            "max": 0
+          },
+          "files": {
+            "n": 1,
+            "p50": 0,
+            "p95": 0,
+            "mean": 0,
+            "min": 0,
+            "max": 0
+          },
+          "hitCounts": [
+            0
+          ],
+          "hitCountMedian": 0,
+          "errors": [
+            "status 125"
+          ]
+        }
+      }
+    },
+    "zh_phrase": {
+      "queries": [
+        "会话保持",
+        "验收标准",
+        "回滚",
+        "灰度发布",
+        "数据一致性",
+        "幂等设计",
+        "限流策略",
+        "缓存失效",
+        "错误码约定",
+        "审计日志",
+        "权限模型",
+        "迁移脚本",
+        "监控告警",
+        "容量评估",
+        "故障演练",
+        "回滚预案",
+        "兼容性",
+        "超时重试",
+        "降级策略",
+        "状态机"
+      ],
+      "backends": {
+        "sqlite_like": {
+          "cold": {
+            "n": 20,
+            "p50": 1.0214999999999463,
+            "p95": 1.4693000000000893,
+            "mean": 0.9894650000000127,
+            "min": 0.5276000000000067,
+            "max": 1.5728000000000293
+          },
+          "warm": {
+            "n": 60,
+            "p50": 0.44619999999997617,
+            "p95": 0.7016999999999598,
+            "mean": 0.4375083333333312,
+            "min": 0.16259999999999764,
+            "max": 0.9175000000000182
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 10039,
+            "p95": 10317,
+            "mean": 9977.2,
+            "min": 9526,
+            "max": 10328
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 2998,
+            "p95": 3099,
+            "mean": 2974.5,
+            "min": 2831,
+            "max": 3099
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            285,
+            912,
+            945,
+            246,
+            185,
+            170,
+            180,
+            170,
+            173,
+            181,
+            268,
+            179,
+            903,
+            251,
+            245,
+            556,
+            818,
+            186,
+            455,
+            180
+          ],
+          "hitCountMedian": 245,
+          "errors": []
+        },
+        "fts_uni": {
+          "cold": {
+            "n": 20,
+            "p50": 1.4826000000000477,
+            "p95": 1.9554999999999154,
+            "mean": 1.5666699999999991,
+            "min": 1.1579999999999018,
+            "max": 2.1732000000000653
+          },
+          "warm": {
+            "n": 60,
+            "p50": 0.8492999999999711,
+            "p95": 1.4633000000000038,
+            "mean": 0.9311850000000012,
+            "min": 0.6744000000001051,
+            "max": 1.846400000000017
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 8743,
+            "p95": 8994,
+            "mean": 8769.25,
+            "min": 8507,
+            "max": 9159
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 2546,
+            "p95": 2626,
+            "mean": 2553.3,
+            "min": 2476,
+            "max": 2691
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            41,
+            886,
+            46,
+            40,
+            43,
+            39,
+            38,
+            34,
+            35,
+            43,
+            32,
+            32,
+            390,
+            38,
+            39,
+            417,
+            33,
+            48,
+            367,
+            38
+          ],
+          "hitCountMedian": 39,
+          "errors": []
+        },
+        "fts_tri": {
+          "cold": {
+            "n": 20,
+            "p50": 1.9873999999999796,
+            "p95": 2.6672999999999547,
+            "mean": 1.9786850000000016,
+            "min": 0.4048000000000229,
+            "max": 2.7948000000000093
+          },
+          "warm": {
+            "n": 60,
+            "p50": 1.300899999999956,
+            "p95": 2.080699999999979,
+            "mean": 1.3604400000000036,
+            "min": 0.07809999999994943,
+            "max": 2.33929999999998
+          },
+          "payloadBytes": {
+            "n": 38,
+            "p50": 5785,
+            "p95": 5921,
+            "mean": 5777.9473684210525,
+            "min": 5652,
+            "max": 5921
+          },
+          "payloadTokens": {
+            "n": 38,
+            "p50": 1652,
+            "p95": 1700,
+            "mean": 1649.8947368421052,
+            "min": 1609,
+            "max": 1700
+          },
+          "payloadRows": {
+            "n": 38,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            285,
+            912,
+            0,
+            246,
+            185,
+            170,
+            180,
+            170,
+            173,
+            181,
+            268,
+            179,
+            903,
+            251,
+            245,
+            556,
+            818,
+            186,
+            455,
+            180
+          ],
+          "hitCountMedian": 186,
+          "errors": []
+        },
+        "fts_tri_like": {
+          "cold": {
+            "n": 20,
+            "p50": 1.5339999999999918,
+            "p95": 1.8322000000000571,
+            "mean": 1.548640000000006,
+            "min": 1.266300000000001,
+            "max": 1.8431000000000495
+          },
+          "warm": {
+            "n": 60,
+            "p50": 0.9986000000000104,
+            "p95": 1.2332999999999856,
+            "mean": 0.9956183333333399,
+            "min": 0.7889999999999873,
+            "max": 1.551300000000083
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 5674,
+            "p95": 5761,
+            "mean": 5633.1,
+            "min": 5037,
+            "max": 5783
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 1614,
+            "p95": 1649,
+            "mean": 1601.3,
+            "min": 1409,
+            "max": 1651
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 20,
+            "p95": 20,
+            "mean": 20,
+            "min": 20,
+            "max": 20
+          },
+          "hitCounts": [
+            285,
+            912,
+            945,
+            246,
+            185,
+            170,
+            180,
+            170,
+            173,
+            181,
+            268,
+            179,
+            903,
+            251,
+            245,
+            556,
+            818,
+            186,
+            455,
+            180
+          ],
+          "hitCountMedian": 245,
+          "errors": []
+        }
+      }
+    },
+    "meta_kw": {
+      "queries": [
+        "ERR_503",
+        "userId",
+        "errorCode",
+        "retryPolicy",
+        "ERR_401",
+        "buildIndex",
+        "paymentsRetry",
+        "retryPolicy",
+        "SQLITE_BUSY",
+        "sessionId",
+        "tokenRefresh",
+        "cacheInvalidate",
+        "buildIndex",
+        "userId",
+        "retryPolicy",
+        "ERR_401",
+        "tenantId",
+        "userId",
+        "E_TIMEOUT",
+        "errorCode"
+      ],
+      "backends": {
+        "sqlite_like": {
+          "cold": {
+            "n": 20,
+            "p50": 0.6462999999998829,
+            "p95": 0.8434999999999491,
+            "mean": 0.6708449999999516,
+            "min": 0.533100000000104,
+            "max": 1.0318999999999505
+          },
+          "warm": {
+            "n": 60,
+            "p50": 0.18599999999992178,
+            "p95": 0.3350000000000364,
+            "mean": 0.20890333333333805,
+            "min": 0.13149999999995998,
+            "max": 0.605199999999968
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 2514,
+            "p95": 4208,
+            "mean": 2740.7,
+            "min": 989,
+            "max": 4762
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 752,
+            "p95": 1244,
+            "mean": 815.7,
+            "min": 296,
+            "max": 1437
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 5,
+            "p95": 9,
+            "mean": 5.6,
+            "min": 2,
+            "max": 9
+          },
+          "hitCounts": [
+            7,
+            5,
+            5,
+            4,
+            8,
+            3,
+            8,
+            4,
+            7,
+            4,
+            9,
+            6,
+            5,
+            4,
+            3,
+            5,
+            6,
+            8,
+            9,
+            2
+          ],
+          "hitCountMedian": 5,
+          "errors": []
+        },
+        "fts_uni_join": {
+          "cold": {
+            "n": 20,
+            "p50": 3.764699999999948,
+            "p95": 4.5417999999999665,
+            "mean": 3.8562150000000317,
+            "min": 3.156400000000076,
+            "max": 4.852399999999989
+          },
+          "warm": {
+            "n": 60,
+            "p50": 1.0139000000001488,
+            "p95": 1.524499999999989,
+            "mean": 1.0630699999999706,
+            "min": 0.7389000000000578,
+            "max": 1.7242999999998574
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 2264,
+            "p95": 3909,
+            "mean": 2403.25,
+            "min": 832,
+            "max": 4004
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 667,
+            "p95": 1144,
+            "mean": 701.3,
+            "min": 244,
+            "max": 1167
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 5,
+            "p95": 9,
+            "mean": 5.6,
+            "min": 2,
+            "max": 9
+          },
+          "hitCounts": [
+            7,
+            5,
+            5,
+            4,
+            8,
+            3,
+            8,
+            4,
+            7,
+            4,
+            9,
+            6,
+            5,
+            4,
+            3,
+            5,
+            6,
+            8,
+            9,
+            2
+          ],
+          "hitCountMedian": 5,
+          "errors": []
+        },
+        "fts_tri_join": {
+          "cold": {
+            "n": 20,
+            "p50": 4.679899999999861,
+            "p95": 5.705699999999979,
+            "mean": 4.894560000000013,
+            "min": 4.118799999999965,
+            "max": 5.970700000000079
+          },
+          "warm": {
+            "n": 60,
+            "p50": 1.5171000000000276,
+            "p95": 2.2282000000000153,
+            "mean": 1.616093333333341,
+            "min": 1.0913000000000466,
+            "max": 2.391600000000153
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 1328,
+            "p95": 2409,
+            "mean": 1494.65,
+            "min": 539,
+            "max": 2455
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 373,
+            "p95": 672,
+            "mean": 418.85,
+            "min": 152,
+            "max": 690
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 5,
+            "p95": 9,
+            "mean": 5.6,
+            "min": 2,
+            "max": 9
+          },
+          "hitCounts": [
+            7,
+            5,
+            5,
+            4,
+            8,
+            3,
+            8,
+            4,
+            7,
+            4,
+            9,
+            6,
+            5,
+            4,
+            3,
+            5,
+            6,
+            8,
+            9,
+            2
+          ],
+          "hitCountMedian": 5,
+          "errors": []
+        }
+      }
+    },
+    "timeline": {
+      "queries": [
+        "@2026-05-15",
+        "@2026-10-22",
+        "@2026-04-25",
+        "@2026-08-24",
+        "@2026-03-09",
+        "@2026-01-25",
+        "@2026-06-29",
+        "@2026-08-24",
+        "@2026-01-28",
+        "@2025-12-25",
+        "admin@2026-04-20",
+        "auth@2026-07-06",
+        "mobile@2026-01-12",
+        "infra@2026-10-12",
+        "reporting@2026-07-27",
+        "onboarding@2026-08-17",
+        "reporting@2026-08-24",
+        "mobile@2025-12-29",
+        "payments@2026-08-03",
+        "admin@2026-07-13"
+      ],
+      "backends": {
+        "db_timeline": {
+          "cold": {
+            "n": 20,
+            "p50": 0.42770000000018626,
+            "p95": 0.7296999999998661,
+            "mean": 0.4825899999999706,
+            "min": 0.3088000000000193,
+            "max": 0.8810000000000855
+          },
+          "warm": {
+            "n": 60,
+            "p50": 0.0466999999998734,
+            "p95": 0.08490000000006148,
+            "mean": 0.061578333333314576,
+            "min": 0.03689999999983229,
+            "max": 0.6013000000000375
+          },
+          "payloadBytes": {
+            "n": 40,
+            "p50": 1707,
+            "p95": 3115,
+            "mean": 1774.15,
+            "min": 271,
+            "max": 3649
+          },
+          "payloadTokens": {
+            "n": 40,
+            "p50": 501,
+            "p95": 914,
+            "mean": 520.25,
+            "min": 80,
+            "max": 1066
+          },
+          "payloadRows": {
+            "n": 40,
+            "p50": 6,
+            "p95": 11,
+            "mean": 6.2,
+            "min": 1,
+            "max": 13
+          },
+          "hitCounts": [
+            11,
+            6,
+            6,
+            8,
+            8,
+            7,
+            10,
+            8,
+            13,
+            9,
+            2,
+            3,
+            1,
+            3,
+            3,
+            9,
+            2,
+            4,
+            6,
+            5
+          ],
+          "hitCountMedian": 6,
+          "errors": []
+        }
+      }
+    }
+  },
+  "recall": {
+    "kw_en": [
+      {
+        "q": "sessionId",
+        "like": 599,
+        "uni": 599,
+        "uniPrefix": 599,
+        "tri": 599,
+        "triLike": 599
+      },
+      {
+        "q": "userId",
+        "like": 603,
+        "uni": 603,
+        "uniPrefix": 603,
+        "tri": 603,
+        "triLike": 603
+      },
+      {
+        "q": "tenantId",
+        "like": 608,
+        "uni": 608,
+        "uniPrefix": 608,
+        "tri": 608,
+        "triLike": 608
+      },
+      {
+        "q": "requestId",
+        "like": 599,
+        "uni": 599,
+        "uniPrefix": 599,
+        "tri": 599,
+        "triLike": 599
+      },
+      {
+        "q": "traceId",
+        "like": 590,
+        "uni": 590,
+        "uniPrefix": 590,
+        "tri": 590,
+        "triLike": 590
+      },
+      {
+        "q": "loadModule",
+        "like": 561,
+        "uni": 561,
+        "uniPrefix": 561,
+        "tri": 561,
+        "triLike": 561
+      },
+      {
+        "q": "retryPolicy",
+        "like": 558,
+        "uni": 558,
+        "uniPrefix": 558,
+        "tri": 558,
+        "triLike": 558
+      },
+      {
+        "q": "tokenRefresh",
+        "like": 575,
+        "uni": 575,
+        "uniPrefix": 575,
+        "tri": 575,
+        "triLike": 575
+      },
+      {
+        "q": "paymentsRetry",
+        "like": 562,
+        "uni": 562,
+        "uniPrefix": 562,
+        "tri": 562,
+        "triLike": 562
+      },
+      {
+        "q": "cacheInvalidate",
+        "like": 577,
+        "uni": 577,
+        "uniPrefix": 577,
+        "tri": 577,
+        "triLike": 577
+      },
+      {
+        "q": "rateLimiter",
+        "like": 554,
+        "uni": 554,
+        "uniPrefix": 554,
+        "tri": 554,
+        "triLike": 554
+      },
+      {
+        "q": "normalizePath",
+        "like": 558,
+        "uni": 558,
+        "uniPrefix": 558,
+        "tri": 558,
+        "triLike": 558
+      },
+      {
+        "q": "fetchDocuments",
+        "like": 583,
+        "uni": 583,
+        "uniPrefix": 583,
+        "tri": 583,
+        "triLike": 583
+      },
+      {
+        "q": "parseFrontmatter",
+        "like": 575,
+        "uni": 575,
+        "uniPrefix": 575,
+        "tri": 575,
+        "triLike": 575
+      },
+      {
+        "q": "buildIndex",
+        "like": 596,
+        "uni": 596,
+        "uniPrefix": 596,
+        "tri": 596,
+        "triLike": 596
+      },
+      {
+        "q": "errorCode",
+        "like": 589,
+        "uni": 589,
+        "uniPrefix": 589,
+        "tri": 589,
+        "triLike": 589
+      },
+      {
+        "q": "ERR_401",
+        "like": 705,
+        "uni": 705,
+        "uniPrefix": 705,
+        "tri": 705,
+        "triLike": 705
+      },
+      {
+        "q": "ERR_503",
+        "like": 690,
+        "uni": 690,
+        "uniPrefix": 690,
+        "tri": 690,
+        "triLike": 690
+      },
+      {
+        "q": "E_TIMEOUT",
+        "like": 712,
+        "uni": 712,
+        "uniPrefix": 712,
+        "tri": 712,
+        "triLike": 712
+      },
+      {
+        "q": "SQLITE_BUSY",
+        "like": 720,
+        "uni": 720,
+        "uniPrefix": 720,
+        "tri": 720,
+        "triLike": 720
+      }
+    ],
+    "zh_phrase": [
+      {
+        "q": "会话保持",
+        "like": 285,
+        "uni": 41,
+        "uniPrefix": 252,
+        "tri": 285,
+        "triLike": 285
+      },
+      {
+        "q": "验收标准",
+        "like": 912,
+        "uni": 886,
+        "uniPrefix": 907,
+        "tri": 912,
+        "triLike": 912
+      },
+      {
+        "q": "回滚",
+        "like": 945,
+        "uni": 46,
+        "uniPrefix": 696,
+        "tri": 0,
+        "triLike": 945
+      },
+      {
+        "q": "灰度发布",
+        "like": 246,
+        "uni": 40,
+        "uniPrefix": 222,
+        "tri": 246,
+        "triLike": 246
+      },
+      {
+        "q": "数据一致性",
+        "like": 185,
+        "uni": 43,
+        "uniPrefix": 147,
+        "tri": 185,
+        "triLike": 185
+      },
+      {
+        "q": "幂等设计",
+        "like": 170,
+        "uni": 39,
+        "uniPrefix": 145,
+        "tri": 170,
+        "triLike": 170
+      },
+      {
+        "q": "限流策略",
+        "like": 180,
+        "uni": 38,
+        "uniPrefix": 140,
+        "tri": 180,
+        "triLike": 180
+      },
+      {
+        "q": "缓存失效",
+        "like": 170,
+        "uni": 34,
+        "uniPrefix": 133,
+        "tri": 170,
+        "triLike": 170
+      },
+      {
+        "q": "错误码约定",
+        "like": 173,
+        "uni": 35,
+        "uniPrefix": 148,
+        "tri": 173,
+        "triLike": 173
+      },
+      {
+        "q": "审计日志",
+        "like": 181,
+        "uni": 43,
+        "uniPrefix": 139,
+        "tri": 181,
+        "triLike": 181
+      },
+      {
+        "q": "权限模型",
+        "like": 268,
+        "uni": 32,
+        "uniPrefix": 230,
+        "tri": 268,
+        "triLike": 268
+      },
+      {
+        "q": "迁移脚本",
+        "like": 179,
+        "uni": 32,
+        "uniPrefix": 141,
+        "tri": 179,
+        "triLike": 179
+      },
+      {
+        "q": "监控告警",
+        "like": 903,
+        "uni": 390,
+        "uniPrefix": 464,
+        "tri": 903,
+        "triLike": 903
+      },
+      {
+        "q": "容量评估",
+        "like": 251,
+        "uni": 38,
+        "uniPrefix": 221,
+        "tri": 251,
+        "triLike": 251
+      },
+      {
+        "q": "故障演练",
+        "like": 245,
+        "uni": 39,
+        "uniPrefix": 213,
+        "tri": 245,
+        "triLike": 245
+      },
+      {
+        "q": "回滚预案",
+        "like": 556,
+        "uni": 417,
+        "uniPrefix": 479,
+        "tri": 556,
+        "triLike": 556
+      },
+      {
+        "q": "兼容性",
+        "like": 818,
+        "uni": 33,
+        "uniPrefix": 803,
+        "tri": 818,
+        "triLike": 818
+      },
+      {
+        "q": "超时重试",
+        "like": 186,
+        "uni": 48,
+        "uniPrefix": 152,
+        "tri": 186,
+        "triLike": 186
+      },
+      {
+        "q": "降级策略",
+        "like": 455,
+        "uni": 367,
+        "uniPrefix": 433,
+        "tri": 455,
+        "triLike": 455
+      },
+      {
+        "q": "状态机",
+        "like": 180,
+        "uni": 38,
+        "uniPrefix": 144,
+        "tri": 180,
+        "triLike": 180
+      }
+    ]
+  },
+  "followup": {
+    "db_body": {
+      "ms": {
+        "n": 39,
+        "p50": 0.2131000000001677,
+        "p95": 0.348700000000008,
+        "mean": 0.2294333333333247,
+        "min": 0.14949999999998909,
+        "max": 0.5288000000000466
+      },
+      "bytes": {
+        "n": 39,
+        "p50": 17139,
+        "p95": 22394,
+        "mean": 17275.923076923078,
+        "min": 13012,
+        "max": 23109
+      }
+    },
+    "idxonly_file": {
+      "ms": {
+        "n": 40,
+        "p50": 0.22730000000001382,
+        "p95": 0.5090999999999894,
+        "mean": 0.2690249999999935,
+        "min": 0.1435999999998785,
+        "max": 0.7099000000000615
+      },
+      "bytes": {
+        "n": 40,
+        "p50": 16513,
+        "p95": 20144,
+        "mean": 16378.1,
+        "min": 11535,
+        "max": 21026
+      }
+    },
+    "file_only": {
+      "ms": {
+        "n": 39,
+        "p50": 0.2703999999998814,
+        "p95": 0.43820000000005166,
+        "mean": 0.27699743589741604,
+        "min": 0.18039999999996326,
+        "max": 0.5543999999999869
+      },
+      "bytes": {
+        "n": 39,
+        "p50": 17139,
+        "p95": 22394,
+        "mean": 17275.923076923078,
+        "min": 13012,
+        "max": 23109
+      }
+    },
+    "rg_file": {
+      "ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "mean": null,
+        "min": null,
+        "max": null
+      },
+      "bytes": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "mean": null,
+        "min": null,
+        "max": null
+      }
+    }
+  },
+  "plans": [
+    {
+      "category": "kw_en",
+      "backend": "sqlite_like",
+      "sql": "SELECT path, title, substr(body, max(1, instr(body, ?) - 30), 160) AS ctx FROM docs WHERE body LIKE ? LIMIT 20",
+      "plan": [
+        "SCAN docs"
+      ]
+    },
+    {
+      "category": "kw_en",
+      "backend": "fts_uni",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_uni, 1, '[', ']', '…', 16) AS ctx FROM fts_uni JOIN docs d ON d.id = fts_uni.rowid WHERE fts_uni MATCH ? ORDER BY rank LIMIT 20",
+      "plan": [
+        "SCAN fts_uni VIRTUAL TABLE INDEX 32:M2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "kw_en",
+      "backend": "fts_tri",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_tri, 1, '[', ']', '…', 16) AS ctx FROM fts_tri JOIN docs d ON d.id = fts_tri.rowid WHERE fts_tri MATCH ? ORDER BY rank LIMIT 20",
+      "plan": [
+        "SCAN fts_tri VIRTUAL TABLE INDEX 32:M2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "kw_en",
+      "backend": "fts_tri_like",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_tri, 1, '[', ']', '…', 16) AS ctx FROM fts_tri JOIN docs d ON d.id = fts_tri.rowid WHERE fts_tri.body LIKE ? LIMIT 20",
+      "plan": [
+        "SCAN fts_tri VIRTUAL TABLE INDEX 0:L1",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "zh_phrase",
+      "backend": "sqlite_like",
+      "sql": "SELECT path, title, substr(body, max(1, instr(body, ?) - 30), 160) AS ctx FROM docs WHERE body LIKE ? LIMIT 20",
+      "plan": [
+        "SCAN docs"
+      ]
+    },
+    {
+      "category": "zh_phrase",
+      "backend": "fts_uni",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_uni, 1, '[', ']', '…', 16) AS ctx FROM fts_uni JOIN docs d ON d.id = fts_uni.rowid WHERE fts_uni MATCH ? ORDER BY rank LIMIT 20",
+      "plan": [
+        "SCAN fts_uni VIRTUAL TABLE INDEX 32:M2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "zh_phrase",
+      "backend": "fts_tri",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_tri, 1, '[', ']', '…', 16) AS ctx FROM fts_tri JOIN docs d ON d.id = fts_tri.rowid WHERE fts_tri MATCH ? ORDER BY rank LIMIT 20",
+      "plan": [
+        "SCAN fts_tri VIRTUAL TABLE INDEX 32:M2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "zh_phrase",
+      "backend": "fts_tri_like",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_tri, 1, '[', ']', '…', 16) AS ctx FROM fts_tri JOIN docs d ON d.id = fts_tri.rowid WHERE fts_tri.body LIKE ? LIMIT 20",
+      "plan": [
+        "SCAN fts_tri VIRTUAL TABLE INDEX 0:L1",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "meta_kw",
+      "backend": "sqlite_like",
+      "sql": "SELECT path, title, substr(body, max(1, instr(body, ?) - 30), 160) AS ctx FROM docs WHERE module = ? AND stage = ? AND body LIKE ? LIMIT 20",
+      "plan": [
+        "SEARCH docs USING INDEX idx_docs_module_stage (module=? AND stage=?)"
+      ]
+    },
+    {
+      "category": "meta_kw",
+      "backend": "fts_uni_join",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_uni, 1, '[', ']', '…', 16) AS ctx FROM fts_uni JOIN docs d ON d.id = fts_uni.rowid WHERE fts_uni MATCH ? AND d.module = ? AND d.stage = ? ORDER BY rank LIMIT 20",
+      "plan": [
+        "SCAN fts_uni VIRTUAL TABLE INDEX 32:M2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "meta_kw",
+      "backend": "fts_tri_join",
+      "sql": "SELECT d.id, d.path, d.title, snippet(fts_tri, 1, '[', ']', '…', 16) AS ctx FROM fts_tri JOIN docs d ON d.id = fts_tri.rowid WHERE fts_tri MATCH ? AND d.module = ? AND d.stage = ? ORDER BY rank LIMIT 20",
+      "plan": [
+        "SCAN fts_tri VIRTUAL TABLE INDEX 32:M2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    },
+    {
+      "category": "timeline",
+      "backend": "db_timeline",
+      "sql": "SELECT c.change_date, d.path, c.summary FROM changes c JOIN docs d ON d.id = c.doc_id WHERE c.change_date = ? LIMIT 20",
+      "plan": [
+        "SEARCH c USING INDEX idx_changes_date (change_date=?)",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"
+      ]
+    }
+  ],
+  "corpus": {
+    "bytes": 3141167,
+    "bytesPerDoc": 3141.167,
+    "changes": 2640,
+    "parseMs": 70.7565
+  },
+  "endToEnd": {
+    "kw_en": {
+      "rg_lookup_ms": 41.326,
+      "rg_payload_bytes": 0,
+      "rg_followup_ms": null,
+      "rg_followup_bytes": null,
+      "rg_total_ms": null,
+      "db_snippet_ms": 3.3474000000000075,
+      "db_snippet_payload_bytes": 5302,
+      "db_full_ms": 3.560500000000175,
+      "db_full_bytes": 17139,
+      "db_idxonly_ms": 2.4103000000000065,
+      "db_idxonly_bytes": 16513,
+      "like_ms": 0.7817000000000007
+    },
+    "zh_phrase": {
+      "rg_lookup_ms": null,
+      "rg_payload_bytes": null,
+      "rg_followup_ms": null,
+      "rg_followup_bytes": null,
+      "rg_total_ms": null,
+      "db_snippet_ms": 1.9873999999999796,
+      "db_snippet_payload_bytes": 5785,
+      "db_full_ms": 2.2005000000001473,
+      "db_full_bytes": 17139,
+      "db_idxonly_ms": 1.7099000000000615,
+      "db_idxonly_bytes": 16513,
+      "like_ms": 1.0214999999999463
+    },
+    "meta_kw": {
+      "rg_lookup_ms": null,
+      "rg_payload_bytes": null,
+      "rg_followup_ms": null,
+      "rg_followup_bytes": null,
+      "rg_total_ms": null,
+      "db_snippet_ms": 4.679899999999861,
+      "db_snippet_payload_bytes": 1328,
+      "db_full_ms": 4.893000000000029,
+      "db_full_bytes": 17139,
+      "db_idxonly_ms": 3.991999999999962,
+      "db_idxonly_bytes": 16513,
+      "like_ms": 0.6462999999998829
+    },
+    "timeline": {
+      "rg_lookup_ms": null,
+      "rg_payload_bytes": null,
+      "rg_followup_ms": null,
+      "rg_followup_bytes": null,
+      "rg_total_ms": null,
+      "db_snippet_ms": 0.42770000000018626,
+      "db_snippet_payload_bytes": 1707,
+      "db_full_ms": null,
+      "db_full_bytes": 17139,
+      "db_idxonly_ms": null,
+      "db_idxonly_bytes": 16513,
+      "like_ms": null
+    }
+  },
+  "spawn": {
+    "rg": {
+      "n": 6,
+      "p50": 67.884,
+      "p95": 74.24,
+      "mean": 68.456,
+      "min": 60.21,
+      "max": 74.24
+    },
+    "grep": {
+      "n": 6,
+      "p50": 74.354,
+      "p95": 79.035,
+      "mean": 75.25583333333333,
+      "min": 72.276,
+      "max": 79.035
+    }
+  }
+}

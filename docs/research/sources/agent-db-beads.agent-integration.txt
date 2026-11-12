@@ -1,0 +1,310 @@
+== docs/integrations/index.md ==
+---
+title: Integrations
+description: Browse every beads editor and agent integration, from bd setup recipes to MCP-based clients
+---
+
+Beads integration pages are based on two sources of support in the repository:
+
+- Built-in `bd setup` recipes from `internal/recipes/recipes.go`
+- First-party MCP integrations and editor guides already shipped in the repo
+
+Run this command to see the built-in setup recipes supported by your installed `bd` binary:
+
+```bash
+bd setup --list
+```
+
+## Built-in Setup Recipes
+
+| Recipe | Integration | Primary setup surface |
+|--------|-------------|-----------------------|
+| `aider` | [Aider](/integrations/aider) | `.aider.conf.yml` and `.aider/` instructions |
+| `claude` | [Claude Code](/integrations/claude-code) | Claude hooks and `CLAUDE.md` |
+| `codex` | [Codex](/integrations/codex) | Beads skill, `AGENTS.md`, and Codex hooks |
+| `cody` | [Sourcegraph Cody](/integrations/cody) | `.cody/rules/beads.md` |
+| `cursor` | [Cursor](/integrations/cursor) | `.cursor/rules/beads.mdc` + `.cursor/hooks.json` |
+| `factory` | [Factory.ai Droid](/integrations/factory) | `AGENTS.md` |
+| `gemini` | [Gemini CLI](/integrations/gemini) | Gemini hooks and `GEMINI.md` |
+| `junie` | [Junie](/integrations/junie) | `.junie/guidelines.md` and MCP config |
+| `kilocode` | [Kilo Code](/integrations/kilocode) | `.kilocode/rules/beads.md` |
+| `kiro` | [Kiro CLI](/integrations/kiro) | `.kiro/steering/beads.md` |
+| `mux` | [Mux](/integrations/mux) | `AGENTS.md`, optional `.mux/AGENTS.md`, and Mux hooks |
+| `opencode` | [OpenCode](/integrations/opencode) | `AGENTS.md` |
+| `windsurf` | [Windsurf](/integrations/windsurf) | `.windsurf/rules/beads.md` |
+
+## MCP-Based Integrations
+
+These integrations use the Beads MCP server rather than a dedicated `bd setup` recipe:
+
+- [MCP Server](/integrations/mcp-server) — the beads MCP server for any
+  MCP-capable client.
+- [GitHub Copilot](/integrations/github-copilot) — Copilot in VS Code via
+  MCP.
+- [GitHub Copilot CLI](/integrations/copilot-cli) — the Copilot coding-agent
+  CLI.
+
+## Other Integration Surfaces
+
+- [Claude Code Plugin](/integrations/claude-code-plugin) — the packaged
+  plugin with slash commands and MCP tools (`/plugin install beads`).
+- [Azure DevOps](/integrations/azure-devops) — configuration reference for
+  syncing beads with ADO work items.
+
+== docs/integrations/claude-code.md (key sections) ==
+---
+title: Claude Code
+description: Wire beads into Claude Code with a SessionStart hook that primes context, using the CLI instead of MCP
+---
+
+How to use beads with Claude Code.
+
+## Setup
+
+### Quick Setup
+
+```bash
+bd setup claude
+```
+
+This installs:
+- **SessionStart hook** - Runs `bd prime --hook-json` when a session starts. SessionStart also fires after context compaction, so the same hook refreshes context automatically.
+- **CLAUDE.md pointer** - A minimal beads section in your project's `CLAUDE.md`, or with `--global` in your user-level `~/.claude/CLAUDE.md`, where it applies only in repositories that use beads (skipped if that file is a symlink).
+
+By default the hook is written to the project's `.claude/settings.json`. Variants:
+
+```bash
+bd setup claude --global   # Install to ~/.claude/settings.json and ~/.claude/CLAUDE.md instead
+bd setup claude --stealth  # Stealth mode: flush only, no git operations
+bd setup claude --remove   # Remove the hook and the CLAUDE.md section
+```
+
+If the [beads plugin](/integrations/claude-code-plugin) is enabled, `bd setup claude` skips writing hooks - the plugin provides its own, and duplicates would run `bd prime` twice per session. Like Claude Code, it takes the plugin's setting from the first settings file that names it: managed settings, `.claude/settings.local.json`, the project's `.claude/settings.json`, then `~/.claude/settings.json`, so `bd setup claude` run in a project that turns the plugin off writes the hook there, and a `--global` install run there warns that the project needs it. When only your own settings enable the plugin and the project's shared `.claude/settings.json` holds an older bare `bd prime` hook, the install replaces it with the current hook, which teammates without the plugin need, and warns that `bd prime` runs twice per session for you. When the project's shared `.claude/settings.json` enables the plugin and only your `.claude/settings.local.json` turns it off, no hook is written to the shared file, where teammates with the plugin would run `bd prime` twice; the install names the hook that already runs `bd prime` for you (a hook in `.claude/settings.local.json` is kept), and otherwise it and `--check` say how to run it for yourself. `--global` skips them only when managed settings or your user settings (`~/.claude/settings.json`) enable the plugin: a plugin enabled in a project's `.claude/settings.json` or `.claude/settings.local.json` runs in that project only. In such a project the global hook and the plugin's both run `bd prime`, and the install and `bd setup claude --check` warn that it runs twice per session there. To run it once, turn the plugin off for yourself in that project's `.claude/settings.local.json`, or enable it in `~/.claude/settings.json` and replace the global install: `bd setup claude --remove --global`, then `bd setup claude --global`.
+
+Claude Code loads the `.claude/settings.local.json` at the repository root, or the main checkout's root in a linked worktree, in every session started in the repository. When that file already has a `bd prime` hook, such as the one an older `bd setup claude` wrote there, and the project's `.claude/settings.json` has none, `bd setup claude` run in a subdirectory or linked worktree adds no second hook and names the one that runs, and it leaves a hook in the current directory's own `.claude/settings.local.json` in place; `bd setup claude --remove` removes the hook from the root's file too. Claude Code runs an identical hook from several settings files once, but each different one, so the install and `--check` warn when two of the project's settings files run different `bd prime` commands, and name the hook to remove.
+
+bd reads managed settings from the files in Claude Code's system directory (`managed-settings.json` and `managed-settings.d/` under `/etc/claude-code`, `/Library/Application Support/ClaudeCode` on macOS, or `C:\Program Files\ClaudeCode` on Windows) and assumes they are in force. It cannot see server-managed settings or an MDM profile. When one of those delivers a policy, Claude Code by default ignores the files, so a plugin they enable may not run, yet `bd setup claude` still leaves the hooks to it and drops an older bare `bd prime` hook from the shared `.claude/settings.json`.
+
+### Manual Setup
+
+Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "bd prime --hook-json" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The `--hook-json` flag wraps the output in the hook JSON envelope Claude Code expects. No `PreCompact` hook is needed - SessionStart fires again after compaction.
+
+### Verify Setup
+
+```bash
+bd setup claude --check
+```
+
+
+== docs/integrations/codex.md ==
+---
+title: Codex
+description: Set up beads for Codex with the beads skill, a managed AGENTS.md section, and native hooks that survive compaction
+---
+
+Use Beads with Codex through the `beads` skill, managed `AGENTS.md` guidance, and native Codex hooks.
+
+```bash
+bd setup codex
+bd setup codex --check
+```
+
+Project setup writes:
+
+- `.agents/skills/beads/` for the Beads skill.
+- `AGENTS.md` with a managed Beads section.
+- `.codex/config.toml` with `[features].hooks = true`.
+- `.codex/hooks.json` with the Beads hook fallback.
+
+`bd init` runs this project setup by default unless `--skip-agents` or `--stealth` is used. Global setup uses `bd setup codex --global` and writes under `$CODEX_HOME` when set, otherwise `~/.codex`.
+
+Codex 0.129.0+ supports `/hooks`, compact lifecycle hooks, and hook-provided developer context. Beads uses that lifecycle to inject `bd prime` on session start and recover context after compaction. Use `/hooks` to inspect or toggle the installed handlers.
+
+## Hook Lifecycle
+
+- `SessionStart` (`startup|resume|clear`) injects full `bd prime` output.
+- `PreCompact` (`manual|auto`) checks `bd prime --memories-only` and warns if Beads context is unavailable.
+- `PostCompact` (`manual|auto`) records that the session needs a Beads refresh.
+- `UserPromptSubmit` injects full `bd prime` once after compaction, then clears the refresh marker.
+
+`PreCompact` alone does not inject context because Codex ignores plain stdout from compact hooks. The post-compact marker plus first-prompt refresh is the reliable recovery path.
+
+Refresh markers are stored in a user cache/temp directory keyed by Codex `session_id` and workspace path. They are not written to tracked files or to the Beads database.
+
+The Beads Codex plugin stores hooks at `plugins/beads/.codex-plugin/hooks/hooks.json` and declares them in `plugins/beads/.codex-plugin/plugin.json` as `"hooks": "./.codex-plugin/hooks/hooks.json"`. Without the plugin, `bd setup codex` installs the same hook config in `.codex/hooks.json` and enables `[features].hooks = true`.
+
+## Manual Fallback
+
+If you manage `.codex/hooks.json` by hand instead of running `bd setup codex`, the equivalent shape is:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [{ "type": "command", "command": "bd codex-hook SessionStart", "statusMessage": "Loading Beads context" }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [{ "type": "command", "command": "bd codex-hook PreCompact", "statusMessage": "Checking Beads context" }]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [{ "type": "command", "command": "bd codex-hook PostCompact", "statusMessage": "Scheduling Beads context refresh" }]
+      }
+
+== docs/cli-reference/prime.md ==
+---
+title: "bd prime"
+description: "Output AI-optimized workflow context"
+---
+
+{/* AUTO-GENERATED: do not edit manually */}
+
+Generated from `bd help --doc prime`.
+
+Output essential Beads workflow context in AI-optimized markdown format.
+
+Automatically detects if MCP server is active and adapts output:
+- MCP mode: Brief workflow reminders (~50 tokens)
+- CLI mode: Full command reference (~1-2k tokens)
+
+Designed for Claude Code, Gemini CLI, and Codex SessionStart hooks to prevent
+agents from forgetting bd workflow after context compaction.
+
+Config options:
+- no-git-ops: When true, outputs stealth mode (no git commands in session close protocol).
+  Set via: bd config set no-git-ops true
+  Useful when you want to control when commits happen manually.
+- agent.profile: Explicit policy profile for git/commit authority wording
+  (conservative | minimal | team-maintainer; default conservative).
+  Set via: bd config set agent.profile team-maintainer
+  Or per-session: BD_AGENT_PROFILE=team-maintainer (env var takes precedence).
+  See docs/getting-started/ide-setup.md#policy-profiles for what each profile means.
+
+	Workflow customization:
+	- Place a .beads/PRIME.md file in the local clone or resolved workspace to override the default workflow text. Persistent memories (from bd remember) are still appended so memory injection keeps working under a custom template.
+	- Use --export to dump the default content for customization.
+	- Use --memories-only for hook contexts that should inject only persistent memories; this returns only the memories section even when a custom PRIME.md is present.
+	- Use --no-memories to omit the persistent memories section (useful when the memories section is large and would dominate a context budget). --memories-only takes precedence if both are set.
+
+Memory injection caps:
+	Large memory sets can exceed what a session-start hook host will ingest,
+	and hosts truncate silently. Cap what prime injects with --max-memories N
+	and/or --max-memory-chars N (or the prime.max-memories /
+	prime.max-memory-chars config keys; an explicit flag wins, and an explicit
+	0 forces unlimited). Caps apply at whole-memory boundaries, at least one
+	memory is always emitted, and a banner ahead of the entries reports how
+	many were elided and how to browse the rest with bd memories.
+	--max-memory-chars caps the total bytes of the injected memory entries;
+	the section header and elision banner are excluded from the budget.
+
+```
+bd prime [flags]
+```
+
+**Flags:**
+
+```
+      --export                 Output default content (ignores PRIME.md override)
+      --full                   Force full CLI output (ignore MCP detection)
+      --hook-json              Wrap output in the SessionStart hook JSON envelope (Claude Code, Gemini CLI, Codex)
+      --max-memories int       Cap injected persistent memories to N entries (0 = unlimited; falls back to the prime.max-memories config key)
+      --max-memory-chars int   Cap the total bytes of injected memory entries, at whole-memory boundaries; section header and banner are not counted (0 = unlimited; falls back to the prime.max-memory-chars config key)
+      --mcp                    Force MCP mode (minimal output)
+      --memories-only          Output only persistent memories for compact hook contexts
+      --no-memories            Omit the persistent memories section (ignored when --memories-only is set, which wins)
+      --stealth                Stealth mode (no git operations, flush only)
+```
+
+== docs/cli-reference/remember.md + memories.md ==
+---
+title: "bd remember"
+description: "Store a persistent memory"
+---
+
+{/* AUTO-GENERATED: do not edit manually */}
+
+Generated from `bd help --doc remember`.
+
+Store a memory that persists across sessions and account rotations.
+
+Memories are injected at prime time (bd prime) so you have them
+in every session without manual loading.
+
+The positional arg is the memory CONTENT (the key is auto-generated from it
+unless --key is given). As a convenience, if the arg is a bare key naming an
+existing memory, it is RECALLED instead of stored (same as 'bd recall');
+a bare key naming nothing is refused. Use --key to store slug-like content.
+
+Examples:
+  bd remember "always run tests with -race flag"
+  bd remember "Dolt phantom DBs hide in three places" --key dolt-phantoms
+  bd remember "auth module uses JWT not sessions" --key auth-jwt
+  bd remember dolt-phantoms        # bare existing key: reads it (= bd recall)
+
+```
+bd remember "<insight>" [flags]
+```
+
+**Flags:**
+
+```
+      --key string   Explicit key for the memory (auto-generated from content if not set). If a memory with this key already exists, it will be updated in place
+```
+---
+title: "bd memories"
+description: "List or search persistent memories"
+---
+
+{/* AUTO-GENERATED: do not edit manually */}
+
+Generated from `bd help --doc memories`.
+
+List all memories, or search by keyword.
+
+Examples:
+  bd memories              # list all memories
+  bd memories dolt         # search for memories about dolt
+  bd memories "race flag"  # search for a phrase
+
+```
+bd memories [search] [flags]
+```
+
+== docs/integrations/mcp-server.md (trade-offs) ==
+145:## Trade-offs
+146-
+147-| Aspect | CLI + Hooks | MCP Server |
+148-|--------|-------------|------------|
+149-| Context overhead | ~1-2k tokens | 10-50k tokens |
+150-| Latency | Direct calls | MCP protocol |
+151-| Setup | Hooks config | MCP config |
+152-| Availability | Shell required | MCP environments |
+153-
+154-## Troubleshooting
+155-
+156-### Server won't start
+157-

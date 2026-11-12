@@ -1,0 +1,44 @@
+# ===== 运行时 / 环境（绝不上传）=====
+.runtime/
+.runtime-asar-files.json
+.devhome/
+.poc/
+.pnpm-store/
+.dsh-poc/
+.tmp-api-test-*/
+
+# ===== 凭据与本地备份（绝不上传）=====
+.artifacts/
+*.credentials.yaml
+.env
+.env.*
+
+# ===== 依赖与构建产物 =====
+node_modules/
+dist/
+*.tgz
+
+# ===== 测试运行产物（测试源码保留）=====
+workbench/tests/e2e/.artifacts/
+.tmp-*/
+**/.tmp-*/
+*.log
+
+# ===== 临时脚本与探针 =====
+scripts-tmp/
+*.tmp
+
+# ===== 数据库运行文件 =====
+*.db-shm
+*.db-wal
+
+# ===== 系统文件 / Windows 保留设备名 =====
+/CON
+/PRN
+/AUX
+/NUL
+/COM[0-9]
+/LPT[0-9]
+Thumbs.db
+Desktop.ini
+.DS_Store

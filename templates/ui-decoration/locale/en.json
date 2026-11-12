@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Composer Decoration",
+    "description": "Draws a blue circle under the message composer. Replace this title, description, and the drawing with your real UI capability."
+  }
+}

@@ -1,0 +1,320 @@
+== beads v0.49.6 README (head, SQLite-era description) ==
+# bd - Beads
+
+**Distributed, git-backed graph issue tracker for AI agents.**
+
+**Platforms:** macOS, Linux, Windows, FreeBSD
+
+[![License](https://img.shields.io/github/license/steveyegge/beads)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/steveyegge/beads)](https://goreportcard.com/report/github.com/steveyegge/beads)
+[![Release](https://img.shields.io/github/v/release/steveyegge/beads)](https://github.com/steveyegge/beads/releases)
+[![npm version](https://img.shields.io/npm/v/@beads/bd)](https://www.npmjs.com/package/@beads/bd)
+[![PyPI](https://img.shields.io/pypi/v/beads-mcp)](https://pypi.org/project/beads-mcp/)
+
+Beads provides a persistent, structured memory for coding agents. It replaces messy markdown plans with a dependency-aware graph, allowing agents to handle long-horizon tasks without losing context.
+
+## ⚡ Quick Start
+
+```bash
+# Install beads CLI (system-wide - don't clone this repo into your project)
+curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+
+# Initialize in YOUR project
+cd your-project
+bd init
+
+# Tell your agent
+echo "Use 'bd' for task tracking" >> AGENTS.md
+```
+
+**Note:** Beads is a CLI tool you install once and use everywhere. You don't need to clone this repository into your project.
+
+## 🛠 Features
+
+* **Git as Database:** Issues stored as JSONL in `.beads/`. Versioned, branched, and merged like code.
+* **Agent-Optimized:** JSON output, dependency tracking, and auto-ready task detection.
+* **Zero Conflict:** Hash-based IDs (`bd-a1b2`) prevent merge collisions in multi-agent/multi-branch workflows.
+* **Invisible Infrastructure:** SQLite local cache for speed; background daemon for auto-sync.
+* **Compaction:** Semantic "memory decay" summarizes old closed tasks to save context window.
+* **Messaging:** Message issue type with threading (`--thread`), ephemeral lifecycle, and mail delegation.
+* **Graph Links:** `relates_to`, `duplicates`, `supersedes`, and `replies_to` for knowledge graphs.
+
+## 📖 Essential Commands
+
+| Command | Action |
+| --- | --- |
+| `bd ready` | List tasks with no open blockers. |
+
+== v0.49.6 docs/ARCHITECTURE.md: three-layer model ==
+# Architecture
+
+This document describes bd's overall architecture - the data model, sync mechanism, and how components fit together. For internal implementation details (FlushManager, Blocked Cache), see [INTERNALS.md](INTERNALS.md).
+
+## The Three-Layer Data Model
+
+bd's core design enables a distributed, git-backed issue tracker that feels like a centralized database. The "magic" comes from three synchronized layers:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CLI Layer                                 │
+│                                                                  │
+│  bd create, list, update, close, ready, show, dep, sync, ...    │
+│  - Cobra commands in cmd/bd/                                     │
+│  - All commands support --json for programmatic use              │
+│  - Tries daemon RPC first, falls back to direct DB access        │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                               v
+┌─────────────────────────────────────────────────────────────────┐
+│                     SQLite Database                              │
+│                     (.beads/beads.db)                            │
+│                                                                  │
+│  - Local working copy (gitignored)                               │
+│  - Fast queries, indexes, foreign keys                           │
+│  - Issues, dependencies, labels, comments, events                │
+│  - Each machine has its own copy                                 │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                         auto-sync
+                        (5s debounce)
+                               │
+                               v
+┌─────────────────────────────────────────────────────────────────┐
+│                       JSONL File                                 │
+│                   (.beads/issues.jsonl)                          │
+│                                                                  │
+│  - Git-tracked source of truth                                   │
+│  - One JSON line per entity (issue, dep, label, comment)         │
+│  - Merge-friendly: additions rarely conflict                     │
+│  - Shared across machines via git push/pull                      │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                          git push/pull
+                               │
+                               v
+┌─────────────────────────────────────────────────────────────────┐
+│                     Remote Repository                            │
+│                    (GitHub, GitLab, etc.)                        │
+│                                                                  │
+│  - Stores JSONL as part of normal repo history                   │
+│  - All collaborators share the same issue database               │
+│  - Protected branch support via separate sync branch             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why This Design?
+
+**SQLite for speed:** Local queries complete in milliseconds. Complex dependency graphs, full-text search, and joins are fast.
+
+**JSONL for git:** One entity per line means git diffs are readable and merges usually succeed automatically. No binary database files in version control.
+
+**Git for distribution:** No special sync server needed. Issues travel with your code. Offline work just works.
+
+## Write Path
+
+When you create or modify an issue:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   CLI Command   │───▶│  SQLite Write   │───▶│  Mark Dirty     │
+│   (bd create)   │    │  (immediate)    │    │  (trigger sync) │
+└─────────────────┘    └─────────────────┘    └────────┬────────┘
+                                                       │
+                                              5-second debounce
+                                                       │
+                                                       v
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Git Commit    │◀───│  JSONL Export   │◀───│  FlushManager   │
+│   (git hooks)   │    │  (incremental)  │    │  (background)   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+1. **Command executes:** `bd create "New feature"` writes to SQLite immediately
+2. **Mark dirty:** The operation marks the database as needing export
+3. **Debounce window:** Wait 5 seconds for batch operations (configurable)
+4. **Export to JSONL:** Only changed entities are appended/updated
+5. **Git commit:** If git hooks are installed, changes auto-commit
+
+Key implementation:
+- Export: `cmd/bd/export.go`, `cmd/bd/autoflush.go`
+- FlushManager: `internal/flush/` (see [INTERNALS.md](INTERNALS.md))
+- Dirty tracking: `internal/storage/sqlite/dirty_issues.go`
+
+## Read Path
+
+When you query issues after a `git pull`:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   git pull      │───▶│  Auto-Import    │───▶│  SQLite Update  │
+│   (new JSONL)   │    │  (on next cmd)  │    │  (merge logic)  │
+└─────────────────┘    └─────────────────┘    └────────┬────────┘
+                                                       │
+                                                       v
+                                               ┌─────────────────┐
+                                               │  CLI Query      │
+                                               │  (bd ready)     │
+                                               └─────────────────┘
+```
+
+1. **Git pull:** Fetches updated JSONL from remote
+2. **Auto-import detection:** First bd command checks if JSONL is newer than DB
+3. **Import to SQLite:** Parse JSONL, merge with local state using content hashes
+4. **Query:** Commands read from fast local SQLite
+
+Key implementation:
+- Import: `cmd/bd/import.go`, `cmd/bd/autoimport.go`
+- Auto-import logic: `internal/autoimport/autoimport.go`
+- Collision detection: `internal/importer/importer.go`
+
+== v0.49.6 docs/SYNC.md ==
+# Sync Architecture
+
+This document explains the design decisions behind `bd sync` - why it works the way it does, and the problems each design choice solves.
+
+> **Looking for something else?**
+> - Command usage: [commands/sync.md](/claude-plugin/commands/sync.md) (Reference)
+> - Troubleshooting: [website/docs/recovery/sync-failures.md](/website/docs/recovery/sync-failures.md) (How-To)
+> - Deletion behavior: [docs/DELETIONS.md](/docs/DELETIONS.md) (Explanation)
+
+## Why Pull-First?
+
+The core problem: if you export local state before seeing what's on the remote, you commit to a snapshot that may conflict with changes you haven't seen yet. Any changes that arrive during pull get imported to the database but never make it back to the exported JSONL — they're silently lost on the next push.
+
+Pull-first sync solves this by reversing the order:
+
+```
+Machine A: Create bd-43, sync
+            ↳ Load local state (bd-43 in memory)
+            ↳ Pull (bd-42 edit arrives in JSONL)
+            ↳ Merge local + remote
+            ↳ Export merged state
+            ↳ Push (contains both bd-43 AND bd-42 edit)
+```
+
+By loading local state into memory before pulling, we can perform a proper merge that preserves both sets of changes.
+
+## The 3-Way Merge Model
+
+Beads uses 3-way merge - the same algorithm Git uses for merging branches. The reason: it distinguishes between "unchanged" and "deleted".
+
+With 2-way merge (just comparing local vs remote), you cannot tell if an issue is missing because:
+- It was deleted locally
+- It was deleted remotely
+- It never existed in one copy
+
+3-way merge adds a **base state** - the snapshot from the last successful sync:
+
+```
+        Base (last sync)
+             |
+      +------+------+
+      |             |
+    Local        Remote
+   (your DB)   (git pull)
+      |             |
+      +------+------+
+             |
+          Merged
+```
+
+This enables precise conflict detection:
+
+| Base | Local | Remote | Result | Reason |
+|------|-------|--------|--------|--------|
+| A | A | A | A | No changes |
+| A | A | B | B | Only remote changed |
+| A | B | A | B | Only local changed |
+| A | B | B | B | Both made same change |
+| A | B | C | **merge** | True conflict |
+| A | - | A | **deleted** | Local deleted, remote unchanged |
+| A | A | - | **deleted** | Remote deleted, local unchanged |
+| A | B | - | B | Local changed after remote deleted |
+| A | - | B | B | Remote changed after local deleted |
+
+The last two rows show why 3-way merge prevents accidental data loss: if one side deleted while the other modified, we keep the modification.
+
+## Sync Flow
+
+```
+bd sync
+
+  1. Pull  -->  2. Merge  -->  3. Export  -->  4. Push
+   Remote       3-way          JSONL          Remote
+     |            |              |              |
+     v            v              v              v
+  Fetch       Compare all    Write merged   Commit +
+  issues.jsonl  three states   to issues.jsonl  push
+```
+
+Step-by-step:
+
+1. **Load local state** - Read all issues from SQLite database into memory
+2. **Load base state** - Read `sync_base.jsonl` (last successful sync snapshot)
+3. **Pull** - Fetch and merge remote git changes
+4. **Load remote state** - Parse `issues.jsonl` after pull
+5. **3-way merge** - Compare base vs local vs remote for each issue
+6. **Import** - Write merged result to database
+7. **Export** - Write database to JSONL (ensures DB is source of truth)
+8. **Commit & Push** - Commit changes and push to remote
+9. **Update base** - Save current state as base for next sync
+
+## Why Different Merge Strategies?
+
+Not all fields should merge the same way. Consider labels: if Machine A adds "urgent" and Machine B adds "blocked", the merged result should have both labels - not pick one or the other.
+
+Beads uses field-specific merge strategies:
+
+| Field Type | Strategy | Why This Strategy? |
+|------------|----------|-------------------|
+| Scalars (title, status, priority) | LWW | Only one value possible; most recent wins |
+| Labels | Union | Multiple valid; keep all (no data loss) |
+| Dependencies | Union | Links should not disappear silently |
+| Comments | Append | Chronological; dedup by ID prevents duplicates |
+
+**LWW (Last-Write-Wins)** uses the `updated_at` timestamp to determine which value wins. On timestamp tie, remote wins (arbitrary but deterministic).
+
+**Union** combines both sets. If local has `["urgent"]` and remote has `["blocked"]`, the result is `["blocked", "urgent"]` (sorted for determinism).
+
+**Append** collects all comments from both sides, deduplicating by comment ID. This ensures conversations are never lost.
+
+## Why "Zombie" Issues?
+
+When merging, there is an edge case: what happens when one machine deletes an issue while another modifies it?
+
+```
+Machine A: Delete bd-42 → sync
+Machine B: (offline) → Edit bd-42 → sync
+           Pull reveals bd-42 was deleted, but local has edits
+```
+
+Beads follows the principle of **no silent data loss**. If local has meaningful changes to an issue that remote deleted, the local changes win. The issue "resurrects" - it comes back from the dead.
+
+This is intentional: losing someone's work without warning is worse than keeping a deleted issue. The user can always delete it again if needed.
+
+However, if the local copy is unchanged from base (meaning the user on this machine never touched it since last sync), the deletion propagates normally.
+
+## Concurrency Protection
+
+What happens if you run `bd sync` twice simultaneously? Without protection, both processes could:
+
+1. Load the same base state
+2. Pull at different times (seeing different remote states)
+3. Merge differently
+4. Overwrite each other's exports
+5. Push conflicting commits
+
+Beads uses an **exclusive file lock** (`.beads/.sync.lock`) to serialize sync operations:
+
+```go
+lock := flock.New(lockPath)
+locked, err := lock.TryLock()
+if !locked {
+    return fmt.Errorf("another sync is in progress")
+}
+defer lock.Unlock()
+```
+
+The lock is non-blocking - if another sync is running, the second sync fails immediately with a clear error rather than waiting indefinitely.
+
+The lock file is not git-tracked (it only matters on the local machine).

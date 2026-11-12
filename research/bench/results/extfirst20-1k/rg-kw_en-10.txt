@@ -1,0 +1,20 @@
+corpus/1k/docs\auth\S8\cache-invalidation-0000093.md:68:- 关于回滚，当前实现见 packages/db/migrations/0007_docs.sql，其中 rateLimiter 负责合并重试与超时逻辑。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000438.md:31:线上问题复盘的根因是 rateLimiter 未校验 userId，导致容量评估在高峰时段失效。
+corpus/1k/docs\analytics\S8\session-keep-alive-0000438.md:36:迁移期间保持权限模型，services/notifications/queue-consumer.ts 中的 rateLimiter 在旧版本下返回 HTTP_429。
+corpus/1k/docs\api-gateway\S8\retry-policy-0000132.md:29:paymentsRetry wraps rateLimiter and retries once when E_CONFLICT is observed.
+corpus/1k/docs\shipping\S8\migration-rollback-0000254.md:17:- 降级策略：rateLimiter 失败时降级为同步调用，错误码统一为 HTTP_429。
+corpus/1k/docs\analytics\S8\retry-policy-0000961.md:24:The rateLimiter helper normalises src/search/index-builder.ts and strips the traceId prefix.
+corpus/1k/docs\analytics\S8\retry-policy-0000961.md:53:- `writeAheadLog`：压测显示 rateLimiter 在 S8 阶段出现抖动，需要复核故障演练与数据一致性。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:25:Benchmarks live in scripts/bench; tokenRefresh is the hot path for rateLimiter.
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:30:- 2026-09-07 赵启明：评审结论：灰度发布需要补一条断言，覆盖 HTTP_429 与 rateLimiter 同时缺失的路径。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:35:- 监控告警：rateLimiter 异常比例超过 1% 触发告警，看板见 infra/terraform/modules/redis/main.tf。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:40:评审结论：灰度发布需要补一条断言，覆盖 HTTP_429 与 rateLimiter 同时缺失的路径。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:48:- 2026-08-27 孙博文：评审结论：灰度发布需要补一条断言，覆盖 SQLITE_BUSY 与 rateLimiter 同时缺失的路径。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:52:线上问题复盘的根因是 rateLimiter 未校验 sessionId，导致故障演练在高峰时段失效。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:53:线上问题复盘的根因是 paymentsRetry 未校验 rateLimiter，导致灰度发布在高峰时段失效。
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:61:A missing rateLimiter used to surface as ERR_503; the fix is covered by infra/terraform/modules/redis/main.tf.
+corpus/1k/docs\shipping\S8\canary-checklist-0000134.md:64:待办：为灰度发布补充监控告警，指标名统一使用 rateLimiter_count。
+corpus/1k/docs\analytics\S8\migration-rollback-0000584.md:33:压测显示 rateLimiter 在 S8 阶段出现抖动，需要复核审计日志与审计日志。
+corpus/1k/docs\shipping\S8\cache-invalidation-0000818.md:16:迁移期间保持验收标准，src/payments/retry-policy.ts 中的 rateLimiter 在旧版本下返回 E_RATE_LIMITED。
+corpus/1k/docs\shipping\S8\cache-invalidation-0000818.md:41:- 2026-06-24 王一帆：迁移期间保持验收标准，services/billing/invoice-renderer.ts 中的 rateLimiter 在旧版本下返回 ERR_503。
+corpus/1k/docs\analytics\S8\canary-checklist-0000720.md:14:The rateLimiter field is validated by parseFrontmatter before the request reaches services/billing/invoice-renderer.ts.

@@ -1,0 +1,20 @@
+corpus/1k/docs/shipping/S8/cache-invalidation-0000619.md:42:- `tenantId`：兼容性说明：infra/terraform/modules/redis/main.tf 在 S8 前仍返回 E_CONFLICT，请按审计日志处理。
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:17:- 压测显示 tenantId 在 S8 阶段出现抖动，需要复核状态机与验收标准。
+corpus/1k/docs/shipping/S8/cache-invalidation-0000818.md:28:压测显示 tenantId 在 S8 阶段出现抖动，需要复核验收标准与超时重试。
+corpus/1k/docs/shipping/S8/migration-rollback-0000254.md:14:压测显示 tenantId 在 S8 阶段出现抖动，需要复核超时重试与灰度发布。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:16:待办：为幂等设计补充监控告警，指标名统一使用 tenantId_count。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:21:A missing tenantId used to surface as SQLITE_BUSY; the fix is covered by services/notifications/queue-consumer.ts.
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:36:- 风险：回滚预案依赖单实例状态，扩容后需要复核 tenantId 的分布。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:43:- `idempotencyKey`：线上问题复盘的根因是 cacheInvalidate 未校验 tenantId，导致回滚预案在高峰时段失效。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:44:本模块在 S8 阶段的核心约束是错误码约定：tenantId 必须由调用方显式传入，缺失时返回 HTTP_429。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:46:Callers must set tenantId and ERR_503; otherwise fetchDocuments rejects the payload with HTTP_429.
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:51:- 回滚预案：切回上一版本并关闭 retryPolicy，观察 tenantId 指标 30 分钟。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:54:待办：为错误码约定补充监控告警，指标名统一使用 tenantId_count。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:56:Benchmarks live in scripts/bench; requestId is the hot path for tenantId.
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:57:- 回滚预案：切回上一版本并关闭 sessionId，观察 tenantId 指标 30 分钟。
+corpus/1k/docs/shipping/S8/retry-policy-0000242.md:58:- `tenantId`：线上问题复盘的根因是 segmentSize 未校验 ERR_503，导致幂等设计在高峰时段失效。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:51:- `tenantId`：线上问题复盘的根因是 traceId 未校验 userId，导致超时重试在高峰时段失效。
+corpus/1k/docs/shipping/S7/canary-checklist-0000559.md:70:线上问题复盘的根因是 tenantId 未校验 sessionId，导致回滚预案在高峰时段失效。
+corpus/1k/docs/shipping/S7/canary-checklist-0000855.md:24:- `tenantId`：线上问题复盘的根因是 errorCode 未校验 errorCode，导致错误码约定在高峰时段失效。
+corpus/1k/docs/shipping/S7/canary-checklist-0000855.md:35:迁移期间保持错误码约定，src/api/middleware/rate-limiter.ts 中的 tenantId 在旧版本下返回 invalid_grant。
+corpus/1k/docs/shipping/S7/migration-rollback-0000745.md:61:压测显示 tenantId 在 S7 阶段出现抖动，需要复核迁移脚本与缓存失效。

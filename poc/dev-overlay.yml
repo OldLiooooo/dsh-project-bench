@@ -1,0 +1,3 @@
+- insert:
+    - id: poc-host-probe-dev
+      name: 'C:/Users/oldap/Documents/dsh-porject-bench/poc/host-probe/index.js'

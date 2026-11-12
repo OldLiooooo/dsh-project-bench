@@ -1,0 +1,31 @@
+# headless 验证 overlay（Lead）：无 GUI 的 profile 里把默认模型指向 grsai（GRSAI_API_KEY 已在 credentials refs），
+# 并补上 headless 默认组合里没有的 agent-preset-registry，让 project-office / project-task preset 生效，
+# 从而在无浏览器的情况下验证 PM 会话 + 项目工具 + 2k 注入。
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: grsai
+    model: gpt-6.1-sol
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      grsai:
+        displayName: GRSAI
+        apiKeyEnv: GRSAI_API_KEY
+        api: openai-responses
+        baseURL: https://grsaiapi.com/v1
+        models:
+          - id: gpt-6.1-sol
+            name: gpt-6.1-sol
+            contextWindow: 400000
+            maxTokens: 32000
+            input:
+              - text
+              - image
+# headless profile 默认只挂 agent-loop，没有 preset 注册表；插入它让 workbench bundle 的两个 preset 激活。
+- insert:
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: project-office

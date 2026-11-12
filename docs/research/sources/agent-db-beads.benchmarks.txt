@@ -1,0 +1,80 @@
+== BENCHMARKS.md typical results ==
+106:### Typical Results (M2 Pro)
+107-
+108-| Operation | Time | Memory | Notes |
+109-|-----------|------|--------|-------|
+110-| GetReadyWork (10K) | 30ms | 16.8MB | Filters ~200 open issues |
+111-| Search (10K, no filter) | 12.5ms | 6.3MB | Returns all open issues |
+112-| Cycle Detection (5000 linear) | 70ms | 15KB | Detects transitive deps |
+113-| Create Issue (10K db) | 2.5ms | 8.9KB | Insert into index |
+114-| Update Issue (10K db) | 18ms | 17KB | Status change |
+115-| **Large Description (100KB)** | **3.3ms** | **874KB** | String handling overhead |
+116-| **Bulk Close (100 issues)** | **1.9s** | **1.2MB** | 100 sequential writes |
+117-| **Sync Merge (20 ops)** | **29ms** | **198KB** | Create 10 + update 10 |
+118-
+119-## Dataset Caching
+120-
+
+== search implementation (current) ==
+69-		lowerQuery := strings.ToLower(query)
+70-		if LooksLikeIssueID(query) {
+71:			whereClauses = append(whereClauses, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
+72-			args = append(args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
+73-		} else {
+74:			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR id LIKE ?)")
+75-			pattern := "%" + lowerQuery + "%"
+76-			args = append(args, pattern, pattern)
+77-		}
+78-	}
+79-
+80-	if filter.TitleSearch != "" {
+81:		whereClauses = append(whereClauses, "LOWER(title) LIKE ?")
+82-		args = append(args, "%"+strings.ToLower(filter.TitleSearch)+"%")
+83-	}
+84-	if filter.TitleContains != "" {
+85:		whereClauses = append(whereClauses, "LOWER(title) LIKE ?")
+86-		args = append(args, "%"+strings.ToLower(filter.TitleContains)+"%")
+87-	}
+88-	if filter.DescriptionContains != "" {
+89-		whereClauses = append(whereClauses, "LOWER(description) LIKE ?")
+90-		args = append(args, "%"+strings.ToLower(filter.DescriptionContains)+"%")
+91-	}
+
+== search docs (current) ==
+---
+title: "bd search"
+description: "Search issues by text query"
+---
+
+{/* AUTO-GENERATED: do not edit manually */}
+
+Generated from `bd help --doc search`.
+
+Search issues across title and ID (all statuses, including closed).
+
+ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching.
+Text queries search titles. Use --desc-contains for description search.
+Use --status open (etc.) to narrow; closed issues are included by default
+so "was this already filed/fixed?" cannot silently answer no. Matches
+beyond --limit are dropped status-blind, so when hunting live work in a
+large DB, narrow with --status open or raise --limit.
+
+Examples:
+  bd search "authentication bug"
+
+== v0.49.6 BENCHMARKS typical results ==
+56:### Typical Results (M2 Pro)
+57-
+58-| Operation | Time | Memory | Notes |
+59-|-----------|------|--------|-------|
+60-| GetReadyWork (10K) | 30ms | 16.8MB | Filters ~200 open issues |
+61-| Search (10K, no filter) | 12.5ms | 6.3MB | Returns all open issues |
+62-| Cycle Detection (5000 linear) | 70ms | 15KB | Detects transitive deps |
+63-| Create Issue (10K db) | 2.5ms | 8.9KB | Insert into index |
+64-| Update Issue (10K db) | 18ms | 17KB | Status change |
+65-| **Large Description (100KB)** | **3.3ms** | **874KB** | String handling overhead |
+66-| **Bulk Close (100 issues)** | **1.9s** | **1.2MB** | 100 sequential writes |
+67-| **Sync Merge (20 ops)** | **29ms** | **198KB** | Create 10 + update 10 |
+68-
+69-## Dataset Caching
+70-
