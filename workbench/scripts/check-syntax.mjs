@@ -15,7 +15,12 @@ import process from 'node:process'
 
 export const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 export const WORKBENCH_ROOT = dirname(SCRIPT_DIR)
-const SKIP_DIRS = new Set(['node_modules', '.artifacts', '.tmp', '.git'])
+/**
+ * Directories never imported by the checker.
+ * `probes` holds 一次性验收探针（直连 SQLite / 拷真实库），它们在模块顶层就执行并 `process.exit`，
+ * 被 import 会劫持本脚本的退出码（让语法门禁失效）。探针必须用 `node <file>` 单独跑。
+ */
+const SKIP_DIRS = new Set(['node_modules', '.artifacts', '.tmp', '.git', 'probes'])
 const EXTENSIONS = ['.js', '.mjs']
 
 /** 浏览器桩：client.js 顶层只调用 __ModuleLoader__.load 注册 factory（不执行 factory）。 */
@@ -72,7 +77,7 @@ export function listSourceFiles(root = WORKBENCH_ROOT) {
 /**
  * 逐个动态 import；返回 {files, syntaxErrors, importErrors, ok, testFiles}。
  * 默认跳过 *.test.mjs 的执行（它们由 node --test / 直接 import 覆盖；导入会真的执行测试并打印报告），
- * 用 --include-tests 强制一并导入。
+ * 用 --include-tests 强制一并导入。`tests/probes/` 整个目录不进扫描（见 SKIP_DIRS 的说明）。
  */
 export async function checkSyntax(options = {}) {
   const root = options.root || WORKBENCH_ROOT

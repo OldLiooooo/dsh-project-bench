@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { createRegistry } from '../../host/registry.js'
+import { createRegistry, projectPaths } from '../../host/registry.js'
 import { createBus } from '../../host/bus.js'
 import { createApi, registerHttp, API_PREFIX, HEARTBEAT_MS } from '../../host/http.js'
 import { createSlice, createDecision, createSession } from '../../host/store.js'
@@ -170,12 +170,17 @@ test('registry.ensure 幂等创建 .project 布局、project.json 与 7 阶段�
   const project = newProject()
   try {
     const db = project.ensure()
-    assert.ok(existsSync(join(project.root, '.project', 'project.db')))
-    assert.ok(existsSync(join(project.root, '.project', 'project.json')))
-    for (const sub of ['exports', join('exports', 'docs'), 'inbox', 'packages']) {
-      assert.ok(existsSync(join(project.root, '.project', sub)), '.project/' + sub + ' 应该存在')
+    // M0：权威数据（DB / project.json / inbox / packages）在 store，导出投影在工作区 docs/。
+    const paths = projectPaths(project.root)
+    assert.ok(existsSync(paths.dbPath), 'project.db 应在 store：' + paths.dbPath)
+    assert.ok(existsSync(paths.jsonPath), 'project.json 应在 store：' + paths.jsonPath)
+    assert.ok(existsSync(paths.inboxDir), 'inbox 应在 store')
+    assert.ok(existsSync(paths.packagesDir), 'packages 应在 store')
+    assert.ok(existsSync(paths.docsDir), 'docs 导出目录应在工作区')
+    if (paths.external) {
+      assert.equal(existsSync(join(project.root, '.project', 'project.db')), false, 'M0 之后工作区不应再有 project.db')
     }
-    const config = JSON.parse(readFileSync(join(project.root, '.project', 'project.json'), 'utf8'))
+    const config = JSON.parse(readFileSync(paths.jsonPath, 'utf8'))
     assert.equal(config.format, 1)
     assert.equal(config.projectId, db.projectId)
     assert.equal(config.root, '.')
@@ -383,6 +388,13 @@ function seedGate(project) {
     gate: 'G1',
     createdBy: 'pm',
   })
+  // 与 gate_submit 一致：提交快照钉住「提交时那一组文档的版本 + hash」。
+  // 批准时按这份快照冻结/导出，而不是按 stage/slice 现场重查（P1 修复的契约）。
+  const versionRow = db.db.prepare('SELECT content_hash FROM doc_versions WHERE document_id = ? ORDER BY version DESC LIMIT 1').get(doc.id)
+  db.db.prepare('INSERT INTO approvals(id, project_id, stage, gate, decision_id, status, evidence_ids_json, snapshot_json, approved_by, approved_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run('appr_seed_gate', db.projectId, 'S1', 'G1', decision.id, 'pending', '[]',
+      JSON.stringify({ decisionId: decision.id, gate: 'G1', stage: 'S1', docIds: [doc.id], docVersions: [{ docId: doc.id, version: 1, hash: versionRow ? versionRow.content_hash : null }], evidenceIds: [] }),
+      null, null)
   return { slice, doc, decision }
 }
 
@@ -650,7 +662,7 @@ test('registry.open(root,{create:true}) 等价 ensure 且幂等复用', () => {
   try {
     const db = project.registry.open('ws-1', { create: true })
     assert.ok(db && db.projectId, 'open({create:true}) 应初始化项目库')
-    assert.ok(existsSync(join(project.root, '.project', 'project.db')))
+    assert.ok(existsSync(projectPaths(project.root).dbPath), 'project.db 应在 store')
     assert.equal(project.registry.open('ws-1', { create: true }), db, '重复 open 应复用句柄')
     assert.equal(overview(db).stages.length, 7)
   } finally {

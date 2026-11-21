@@ -113,19 +113,50 @@ export function simulateGateApprove(host, db, input) {
 }
 
 /**
+ * 提交门禁（等价 PM 的 gate_submit）：写一条 pending approvals 行，把「提交时那一组文档的
+ * 版本 + 内容 hash」钉进 snapshot_json。批准路径只认这份快照，不再按 stage/slice 现场重查。
+ */
+function submitGate(host, db, input = {}) {
+  const docVersions = []
+  for (const docId of input.docIds || []) {
+    const doc = host.modules.docs.getDocument(db, docId)
+    if (!doc) continue
+    const version = Number(doc.currentVersion || 0)
+    const row = version > 0 ? host.modules.docs.getDocVersion(db, docId, version) : undefined
+    docVersions.push({ docId: doc.id, version, hash: row ? row.contentHash : null })
+  }
+  const approvalId = 'ap-submit-' + String(input.gate || 'G') + '-' + String((input.decisionId || '').slice(-8))
+  const snapshot = {
+    decisionId: input.decisionId || null,
+    gate: input.gate || null,
+    stage: input.stageKey || null,
+    docIds: input.docIds || [],
+    docVersions,
+    evidenceIds: input.evidenceIds || [],
+    submittedBy: input.submittedBy || 'pm',
+  }
+  db.db.prepare('INSERT INTO approvals(id, project_id, stage, gate, decision_id, status, evidence_ids_json, snapshot_json, approved_by, approved_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(approvalId, db.projectId, input.stageKey || null, input.gate || null, input.decisionId || null, 'pending',
+      JSON.stringify(input.evidenceIds || []), JSON.stringify(snapshot), null, null)
+  return { approvalId, docVersions }
+}
+
+/**
  * 用户批准门禁：优先调用真实 project.resolveDecisionAction（与面板 POST /decision 同一实现），
  * 只有该 API 缺失时才回退到模拟门禁动作（早期模块未落地时的兼容路径）。
  */
-function approveGate(host, ctx, db, input) {
+async function approveGate(host, ctx, db, input) {
   const project = host.modules.project
+  const pending = db.db.prepare("SELECT id FROM approvals WHERE project_id = ? AND decision_id = ? AND status = 'pending' ORDER BY rowid DESC LIMIT 1").get(db.projectId, input.decisionId)
+  if (!pending) submitGate(host, db, input)
   if (project && typeof project.resolveDecisionAction === 'function') {
-    const result = project.resolveDecisionAction(ctx, db, {
+    const result = await project.resolveDecisionAction(ctx, db, {
       id: input.decisionId,
       status: 'approved',
       decidedBy: input.decidedBy || 'user:owner',
       rationale: input.rationale || '用户批准',
       confirmed: true,
-    }, { root: input.root, exportMap: input.exportMap })
+    }, { root: input.root, exportMap: input.exportMap, registry: host.deps && host.deps.registry })
     H.expect(result && result.decision && result.decision.status === 'approved', '决策应 approved')
     H.expect(result.actions && result.actions.approved === true, '门禁 approve 动作应执行')
     return result
@@ -261,7 +292,7 @@ export async function runReplay(options = {}) {
 
   // ---- 第 5 步：用户批准 PRD；冻结 + 导出；阶段 S1→S2 ----
   await step(5, '用户批准 PRD；冻结文档、导出 docs 快照、阶段 S1→S2', async () => {
-    const result = approveGate(host, ctx, db, { decisionId: gate1DecisionRef.id, root, exportMap, rationale: 'PRD 认可' })
+    const result = await approveGate(host, ctx, db, { decisionId: gate1DecisionRef.id, docIds: [prdDoc.id], evidenceIds: [], stageKey: 'S1', gate: 'G1', root, exportMap, rationale: 'PRD 认可' })
     const actions = result.actions
     H.expect(actions.frozenDocs.length >= 1, 'G1 应冻结相关文档')
     H.expect(actions.frozenDocs.some((doc) => doc.docId === prdDoc.id), 'G1 冻结集合应包含 PRD')
@@ -288,6 +319,8 @@ export async function runReplay(options = {}) {
 
   // ---- 第 7 步：UX/架构写文档与证据（版本链） ----
   let specDoc
+let implDocRef = { id: undefined }
+let reportRef = { id: undefined }
   await step(7, 'UX 写交互稿（v1→v2）；架构写 ADR/接口规格；评审证据', async () => {
     uxDocRef.id = docs.createDocument(db, { sliceId: uxSlice.id, type: 'ux', logicalKey: 'ux/payment-refund', title: '退款交互稿', stage: 'S2', ownerSession: uxSession.id }).id
     docs.writeDocumentVersion(db, { docId: uxDocRef.id, content: '# 退款交互 v1\n订单详情页增加「申请退款」。', authorSession: uxSession.id })
@@ -315,9 +348,9 @@ export async function runReplay(options = {}) {
       options: [{ id: 'approve', label: '批准' }, { id: 'reject', label: '驳回' }], recommended: 'approve',
       consequences: '驳回将退回 UX 返工', irreversible: false, stage: 'S2', gate: 'G2', createdBy: pmSession.id,
     })
-    const g2Result = approveGate(host, ctx, db, { decisionId: g2.id, root, exportMap, rationale: '交互稿通过' })
+    const g2Result = await approveGate(host, ctx, db, { decisionId: g2.id, docIds: [uxDocRef.id], evidenceIds: [], stageKey: 'S2', gate: 'G2', root, exportMap, rationale: '交互稿通过' })
     H.expectEqual(g2Result.actions.stage.to, 'S3', 'G2 应推进 S2→S3')
-    const g3Result = approveGate(host, ctx, db, { decisionId: gate.id, root, exportMap, rationale: '架构通过' })
+    const g3Result = await approveGate(host, ctx, db, { decisionId: gate.id, docIds: [adrDocRef.id, specDoc.id], evidenceIds: [], stageKey: 'S3', gate: 'G3', root, exportMap, rationale: '架构通过' })
     H.expectEqual(g3Result.actions.stage.to, 'S4', 'G3 应推进 S3→S4')
     H.expectEqual(activeStage().key, 'S4', '阶段应推进到 S4 实现')
     H.expect(g2Result.actions.frozenDocs.length + g3Result.actions.frozenDocs.length >= 2, 'G2/G3 应冻结 UX 与 ADR 文档')
@@ -350,6 +383,7 @@ export async function runReplay(options = {}) {
     store.addArtifact(db, { sliceId: coreSlice.id, kind: 'code', path: 'src/refund/state-machine.js', contentHash: util.sha256(code), bytes: code.length, metadata: { session: coderCore.session.id } })
     store.addEvidence(db, { sliceId: coreSlice.id, taskId: coderCore.task.id, kind: 'test', command: 'node --test src/refund', resultSummary: '8/8 通过；幂等用例覆盖重复请求', contentHash: util.sha256('8/8'), createdBy: coderCore.session.id })
     const implDoc = docs.createDocument(db, { sliceId: coreSlice.id, type: 'design', logicalKey: 'design/refund-state-machine', title: '退款状态机实现说明', stage: 'S4', ownerSession: coderCore.session.id })
+    implDocRef.id = implDoc.id
     docs.writeDocumentVersion(db, { docId: implDoc.id, content: '# 退款状态机\n状态 pending → refunded；幂等键 orderId + requestId。', authorSession: coderCore.session.id })
     const coderHandoff = docs.createDocument(db, { sliceId: coreSlice.id, type: 'handoff', logicalKey: 'handoff/payment-core', title: '码农交接：支付核心', stage: 'S4', ownerSession: coderCore.session.id })
     docs.writeDocumentVersion(db, { docId: coderHandoff.id, content: '## 交接\n退款核心状态机完成，单测 8/8。\n## 片外改动\n无。', authorSession: coderCore.session.id })
@@ -376,7 +410,7 @@ export async function runReplay(options = {}) {
       options: [{ id: 'approve', label: '批准' }, { id: 'reject', label: '退回' }], recommended: 'approve',
       consequences: '退回将让码农返工', irreversible: false, stage: 'S4', gate: 'G4', createdBy: pmSession.id,
     })
-    const g4Result = approveGate(host, ctx, db, { decisionId: g4.id, root, exportMap, rationale: '实现交接完整' })
+    const g4Result = await approveGate(host, ctx, db, { decisionId: g4.id, docIds: [implDocRef.id], evidenceIds: [], stageKey: 'S4', gate: 'G4', root, exportMap, rationale: '实现交接完整' })
     H.expectEqual(g4Result.actions.stage.to, 'S5', 'G4 应推进 S4→S5')
     testSession = store.createSession(db, { name: '测试-payment-core-回归', kind: 'task', role: '测试', sliceId: coreSlice.id, dshSessionId: 'dsh-tester-1', provider: 'deepseek-official', model: 'deepseek-flash' })
     leases.acquireLease(db, { sliceId: coreSlice.id, sessionId: testSession.id, ttlMs: 60 * 60 * 1000, reason: '独立验证' })
@@ -387,6 +421,7 @@ export async function runReplay(options = {}) {
   await step(12, '测试会话独立验证；写验收证据与回归报告', async () => {
     store.addEvidence(db, { sliceId: coreSlice.id, kind: 'acceptance', command: 'node --test tests/refund', resultSummary: '独立回归 12/12 通过；覆盖幂等/超时/重复回调', createdBy: testSession.id })
     const report = docs.createDocument(db, { sliceId: coreSlice.id, type: 'report', logicalKey: 'report/refund-regression', title: '退款回归报告', stage: 'S5', ownerSession: testSession.id })
+    reportRef.id = report.id
     docs.writeDocumentVersion(db, { docId: report.id, content: '# 回归报告\n12/12 通过。\n## 结论\n可进入验收门禁 G5。', authorSession: testSession.id })
     leases.releaseLease(db, { sliceId: coreSlice.id, sessionId: testSession.id })
     store.endSession(db, { id: testSession.id, status: 'done' })
@@ -400,7 +435,7 @@ export async function runReplay(options = {}) {
       options: [{ id: 'approve', label: '验收' }, { id: 'reject', label: '拒收' }], recommended: 'approve',
       consequences: '拒收将开缺陷任务回实现', irreversible: false, stage: 'S5', gate: 'G5', createdBy: pmSession.id,
     })
-    const result = approveGate(host, ctx, db, { decisionId: gate.id, root, exportMap, rationale: '验收通过' })
+    const result = await approveGate(host, ctx, db, { decisionId: gate.id, docIds: [reportRef.id], evidenceIds: [], stageKey: 'S5', gate: 'G5', root, exportMap, rationale: '验收通过' })
     H.expectEqual(result.actions.stage.to, 'S6', 'G5 应推进 S5→S6')
     H.expectEqual(activeStage().key, 'S6', '阶段应推进到 S6 发布')
     return 'S6'
@@ -413,7 +448,7 @@ export async function runReplay(options = {}) {
       options: [{ id: 'approve', label: '发布' }, { id: 'reject', label: '不发布' }], recommended: 'approve',
       consequences: '不发布则不导出快照', irreversible: false, stage: 'S6', gate: 'G6', createdBy: pmSession.id,
     })
-    const g6Result = approveGate(host, ctx, db, { decisionId: g6.id, root, exportMap, rationale: '发布' })
+    const g6Result = await approveGate(host, ctx, db, { decisionId: g6.id, docIds: [reportRef.id], evidenceIds: [], stageKey: 'S6', gate: 'G6', root, exportMap, rationale: '发布' })
     H.expectEqual(g6Result.actions.stage.to, 'S7', 'G6 应推进 S6→S7')
     exportMod.exportSnapshot(db, { root })
     H.expect(eventKinds(db).includes('export/snapshot'), '应记录 export/snapshot 事件')
@@ -489,7 +524,9 @@ export async function runReplay(options = {}) {
   await step(17, '恢复：关闭项目库后重开，revision/阶段/导出文件一致', async () => {
     const beforeRevision = db.revision()
     db.close()
-    const reopened = new host.modules.db.ProjectDb(join(root, '.project', 'project.db'))
+    // M0：权威源在 store（由 registry 决定位置），重开必须走同一套布局解析。
+    const reopenPaths = host.modules.registry.projectPaths(root)
+    const reopened = new host.modules.db.ProjectDb(reopenPaths.dbPath)
     try {
       H.expectEqual(reopened.revision(), beforeRevision, '重开 DB 后 revision 应一致')
       H.expectEqual(reopened.projectId, db.projectId, '重开后 projectId 应一致')

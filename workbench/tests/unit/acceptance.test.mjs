@@ -76,8 +76,11 @@ export async function makeSuite() {
       const reopened = new dbMod.ProjectDb(join(root, '.project', 'project.db'))
       H.expectEqual(reopened.projectId, db.projectId, '重开后 projectId 应保持')
       H.expectEqual(reopened.revision(), 0, '重开后 revision 应为 0')
+      // 每个迁移版本恰好一行（v2/v3 各一行），重开不会重复写入。
       const count = reopened.db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get()
-      H.expectEqual(Number(count.c), 1, 'schema_migrations 不应重复写入')
+      const versions = reopened.db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => Number(row.version))
+      H.expectEqual(Number(count.c), versions.length, 'schema_migrations 不应重复写入（每版本恰好一行）')
+      H.expectEqual(JSON.stringify(versions), JSON.stringify([2, 3]), '迁移版本应为 2 和 3')
       reopened.close()
     } finally { db.close(); }
   })
@@ -198,6 +201,128 @@ export async function makeSuite() {
     add('context: 2k 预算与降级', async () => {}, { skip: 'host/context.js 尚未落地' })
   } else {
     add('context: 2k 预算硬上限与降级标记', async () => { await checkContextBudget(host) })
+  }
+
+  // ---- W2 收尾：阶段模板读回 + 换模板落地（retire 不删行） + 活阶段机过滤 ----
+  const registryMod2 = modules.registry
+  const defaultsMod2 = modules.defaults
+  if (!registryMod2 || !defaultsMod2) {
+    add('W2: 换阶段模板（读回/落地/退役）', async () => {}, { skip: 'registry/defaults 未落地' })
+  } else {
+    add('W2: project.json 的 stageTemplate 真的被读回（不是只写不读）', async () => {
+      const root = H.makeTempProject('w2-read')
+      const ctx = H.makeFakeCtx({ workspaces: [{ id: 'ws-w2', path: root, title: 'w2' }], rejection: () => undefined })
+      const registry = registryMod2.createRegistry(ctx)
+      try {
+        registry.ensure('ws-w2', { name: 'w2' })
+        const paths = registryMod2.projectPaths(root)
+        const json = JSON.parse(readFileSync(paths.jsonPath, 'utf8'))
+        json.stageTemplate = defaultsMod2.LUMIO_STAGE_TEMPLATE
+        writeFileSync(paths.jsonPath, JSON.stringify(json, null, 2), 'utf8')
+        registry.closeAll()
+        const registry2 = registryMod2.createRegistry(ctx)
+        const db2 = registry2.ensure('ws-w2', { name: 'w2' })
+        const live = db2.db.prepare("SELECT key FROM stages WHERE project_id = ? AND status != 'retired' ORDER BY position").all(db2.projectId).map((r) => r.key)
+        H.expect(live.includes('PRD') && live.includes('DEV'), '应读回 lumio 模板，实际：' + live.join(','))
+        registry2.closeAll()
+      } finally { try { registry.closeAll() } catch { /* closed */ } }
+    })
+
+    add('W2: 换模板必须显式确认；旧阶段 retire 不删行；active 恰一个', async () => {
+      const root = H.makeTempProject('w2-remap')
+      const ctx = H.makeFakeCtx({ workspaces: [{ id: 'ws-w2r', path: root, title: 'w2r' }], rejection: () => undefined })
+      const registry = registryMod2.createRegistry(ctx)
+      try {
+        registry.ensure('ws-w2r', { name: 'w2r' })
+        H.expectThrows(() => registry.applyStageRemap('ws-w2r', defaultsMod2.LUMIO_STAGE_TEMPLATE), 'CONFIRM_REQUIRED', '未确认应拒绝')
+        const applied = registry.applyStageRemap('ws-w2r', defaultsMod2.LUMIO_STAGE_TEMPLATE, { confirmed: true })
+        H.expectEqual(applied.applied, true, '确认后应落地')
+        const rows = applied.stages
+        const retired = rows.filter((r) => r.status === 'retired').map((r) => r.key)
+        H.expect(retired.length === 7, '旧 S1..S7 应全部 retire（不删除），实际：' + retired.join(','))
+        const active = rows.filter((r) => r.status === 'active')
+        H.expectEqual(active.length, 1, '换模板后 active 阶段数必须恰为 1')
+        H.expectEqual(active[0].key, 'PRD', 'active 应是新模板第一个阶段')
+        // 活阶段机过滤：listStages 默认不含 retired
+        const snapshot = modules.snapshot
+        if (snapshot && typeof snapshot.listStages === 'function') {
+          const db = registry.open('ws-w2r')
+          const liveStages = snapshot.listStages(db).map((s) => s.key)
+          H.expect(!liveStages.includes('S1'), 'listStages 默认不应返回 retired 阶段')
+          const allStages = snapshot.listStages(db, { includeRetired: true }).map((s) => s.key)
+          H.expect(allStages.includes('S1'), '显式 includeRetired 时才返回历史阶段')
+        }
+      } finally { try { registry.closeAll() } catch { /* closed */ } }
+    })
+  }
+
+  // ---- M0：权威源外移（单写的物理前提） ----
+  if (!registryMod2) {
+    add('M0: 权威源外移 + 旧库迁移', async () => {}, { skip: 'registry 未落地' })
+  } else {
+    add('M0: 权威源默认在 store（不在工作区），导出投影仍在工作区', async () => {
+      const root = H.makeTempProject('m0-home')
+      const prevHome = process.env.DSH_HOME
+      const prevMode = process.env.PROJECT_WORKBENCH_STORE
+      process.env.DSH_HOME = join(root, '.fake-dsh-home')
+      delete process.env.PROJECT_WORKBENCH_STORE
+      const ctx = H.makeFakeCtx({ workspaces: [{ id: 'ws-m0', path: root, title: 'm0' }], rejection: () => undefined })
+      const registry = registryMod2.createRegistry(ctx)
+      try {
+        registry.ensure('ws-m0', { name: 'm0' })
+        const paths = registryMod2.projectPaths(root)
+        H.expectEqual(paths.external, true, '默认应是外部 store')
+        H.expect(existsSync(paths.dbPath), 'project.db 应在 store：' + paths.dbPath)
+        H.expect(existsSync(paths.jsonPath), 'project.json 应在 store')
+        H.expect(!existsSync(join(root, '.project', 'project.db')), 'M0 后工作区不应再有 project.db')
+        H.expect(!existsSync(join(root, '.project', 'project.json')), 'M0 后工作区不应再有 project.json')
+        H.expect(existsSync(paths.docsDir), '导出 docs 目录应在工作区')
+        // 同一工作区根 → 稳定 key（幂等）
+        H.expectEqual(registryMod2.workspaceKey(root), registryMod2.workspaceKey(root), 'workspaceKey 应稳定')
+      } finally {
+        registry.closeAll()
+        if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome
+        if (prevMode === undefined) delete process.env.PROJECT_WORKBENCH_STORE; else process.env.PROJECT_WORKBENCH_STORE = prevMode
+      }
+    })
+
+    add('M0: 旧库（工作区内 .project）自动迁移到 store，且原件保留可回滚', async () => {
+      const root = H.makeTempProject('m0-migrate')
+      const prevHome = process.env.DSH_HOME
+      const prevMode = process.env.PROJECT_WORKBENCH_STORE
+      process.env.DSH_HOME = join(root, '.fake-dsh-home')
+      delete process.env.PROJECT_WORKBENCH_STORE
+      const ctx = H.makeFakeCtx({ workspaces: [{ id: 'ws-mig', path: root, title: 'mig' }], rejection: () => undefined })
+      try {
+        // 先在 local 模式建一个「老库」
+        process.env.PROJECT_WORKBENCH_STORE = 'local'
+        const legacy = registryMod2.createRegistry(ctx)
+        const legacyDb = legacy.ensure('ws-mig', { name: 'mig' })
+        const legacyProjectId = legacyDb.projectId
+        legacyDb.db.prepare("INSERT INTO slices(id, project_id, type, key, title, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)")
+          .run('slice-legacy', legacyProjectId, 'workitem', 'legacy', '老切片', 'open', new Date().toISOString(), new Date().toISOString())
+        legacy.closeAll()
+        const legacyPath = join(root, '.project', 'project.db')
+        H.expect(existsSync(legacyPath), 'local 模式应把 DB 建在工作区')
+
+        // 切回默认（home）→ open 时应自动迁移
+        delete process.env.PROJECT_WORKBENCH_STORE
+        const paths = registryMod2.projectPaths(root)
+        H.expectEqual(paths.external, true, '应解析到外部 store')
+        const migrated = registryMod2.createRegistry(ctx)
+        const db = migrated.open('ws-mig')
+        H.expect(db, '自动迁移后应能打开项目')
+        H.expectEqual(db.projectId, legacyProjectId, '迁移后 projectId 保持一致')
+        const row = db.db.prepare("SELECT key FROM slices WHERE id = 'slice-legacy'").get()
+        H.expect(row && row.key === 'legacy', '迁移后数据完整')
+        H.expect(existsSync(paths.dbPath), '数据应落在 store')
+        H.expect(existsSync(legacyPath), '原件应保留（可回滚）')
+        migrated.closeAll()
+      } finally {
+        if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome
+        if (prevMode === undefined) delete process.env.PROJECT_WORKBENCH_STORE; else process.env.PROJECT_WORKBENCH_STORE = prevMode
+      }
+    })
   }
 
   return cases

@@ -2,7 +2,10 @@
 // 运行：node --test workbench/tests/unit/tools.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, copyFileSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
+import { ensureDir as H_ensureDir } from '../e2e/harness.mjs'
+const H = { ensureDir: H_ensureDir }
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ProjectDb } from '../../host/db.js'
@@ -21,7 +24,7 @@ const EXPECTED_TOOLS = [
   'artifact_add', 'decision_create', 'doc_export', 'doc_freeze', 'doc_get', 'doc_list', 'doc_write',
   'evidence_add', 'export_project', 'file_index', 'gate_submit', 'import_inbox', 'project_brief',
   'project_init', 'project_status', 'project_recall', 'session_finish_task', 'session_send_task',
-  'session_spawn_task', 'session_task_report', 'slice_create', 'slice_list', 'slice_update',
+  'session_spawn_task', 'session_task_report', 'slice_create', 'slice_list', 'slice_scope', 'slice_update',
   'task_create', 'task_list', 'task_update',
 ]
 
@@ -131,7 +134,7 @@ function assertToolError(promise, code) {
   })
 }
 
-test('工具清单与契约 §7 一致（26 个，含文件回填索引 file_index），且都带 JSON Schema 参数与输出声明', (t) => {
+test('工具清单与契约一致（27 个，含 file_index 与 v4 的 slice_scope），且都带 JSON Schema 参数与输出声明', (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const catalog = toolCatalog(env.ctx, env.deps)
@@ -150,14 +153,14 @@ test('工具清单与契约 §7 一致（26 个，含文件回填索引 file_ind
   }
 })
 
-test('when 过滤：PM 看 22 个、任务会话看 15 个、普通/子 agent 看 0 个', async (t) => {
+test('when 过滤：PM 看 23 个、任务会话看 15 个、普通/子 agent 看 0 个', async (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const pm = createPm(env)
   const slice = createSlice(env)
   const task = createTaskSession(env, slice)
   const pmVisible = visibleToolNames(env, pm.agent)
-  assert.equal(pmVisible.length, 22)
+  assert.equal(pmVisible.length, 23)
   assert.ok(pmVisible.includes('session_spawn_task'))
   assert.ok(pmVisible.includes('project_status'))
   assert.ok(pmVisible.includes('gate_submit'))
@@ -361,6 +364,385 @@ test('PM 决策与门禁：decision_create + gate_submit 生成 pending approval
   assert.equal(approval.gate, 'G1')
   // 门禁提交缺证据 → NO_EVIDENCE
   await assertToolError(callTool(env, 'gate_submit', { gate: 'G2', docIds: [], evidenceIds: [], summary: 'x' }, pm.agent), 'NO_EVIDENCE')
+})
+
+// ---------------------------------------------------------------------------
+// P1 修复回归：门禁状态机 + 收工租约（独立审查 business-logic-review.zh.md 的 4 条）
+// 这些用例锁住「拒绝」本身——不是看它跑通，而是看它在该拒绝的时候确实拒绝了。
+// ---------------------------------------------------------------------------
+
+/** 造一个带阶段机的项目（gate_submit 需要 active 阶段 + 阶段门禁匹配）。 */
+function projectWithStages(env) {
+  const rows = [
+    { key: 'S1', name: '产品', gate: 'G1' },
+    { key: 'S2', name: 'UX', gate: 'G2' },
+    { key: 'S3', name: '架构', gate: 'G3' },
+  ]
+  env.db.tx(function () {
+    rows.forEach(function (row, index) {
+      env.db.db.prepare('INSERT INTO stages(id, project_id, key, name, status, gate, position) VALUES (?,?,?,?,?,?,?)')
+        .run('stage-' + row.key, env.db.projectId, row.key, row.name, index === 0 ? 'active' : 'pending', row.gate, index + 1)
+    })
+  })
+}
+
+test('P1 门禁：不能把门禁提交给未来阶段（否则会出现两个 active 阶段）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款 PRD\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: 'PRD 评审通过' }, task.agent)
+  // 当前 active 是 S1/G1：提交到 S3/G3 必须被拒
+  await assertToolError(callTool(env, 'gate_submit', {
+    gate: 'G3', stage: 'S3', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '跳过前两个阶段',
+  }, pm.agent), 'GATE_STAGE_INVALID')
+  const activeCount = env.db.db.prepare("SELECT COUNT(*) AS c FROM stages WHERE status = 'active'").get().c
+  assert.equal(Number(activeCount), 1, '拒绝后阶段状态不应变化')
+})
+
+test('P1 门禁：gate 与当前阶段不匹配被拒', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款 PRD\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  // 当前是 S1（门禁 G1），提交 G2 应被拒
+  await assertToolError(callTool(env, 'gate_submit', {
+    gate: 'G2', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '门禁错配',
+  }, pm.agent), 'GATE_STAGE_INVALID')
+})
+
+test('P1 门禁：批准时按「提交时的文档集合」冻结，不按 stage 现场重查', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const submitted = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '被提交的 PRD', content: '# 提交的\n' }, task.agent)
+  // 同一阶段下另一篇「未被提交」的文档
+  const other = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '未被提交的 PRD', content: '# 没提交\n', logicalKey: 'prd/other' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  const gate = await callTool(env, 'gate_submit', {
+    gate: 'G1', docIds: [submitted.doc.id], evidenceIds: [evidence.evidence.id], summary: '只提交一篇',
+  }, pm.agent)
+  const project = await import('../../host/project.js')
+  const result = await project.resolveDecisionAction(env.ctx, env.db, { id: gate.decision.id, status: 'approved', confirmed: true }, { root: env.root })
+  const frozenIds = result.actions.frozenDocs.map(function (item) { return item.docId })
+  assert.deepEqual(frozenIds, [submitted.doc.id], '只应冻结提交的那一篇')
+  assert.ok(!frozenIds.includes(other.doc.id), '未被提交的同阶段文档不得被冻结')
+  const otherRow = env.db.db.prepare('SELECT status FROM documents WHERE id = ?').get(other.doc.id)
+  assert.equal(otherRow.status !== 'frozen', true, '未提交文档应保持原状态')
+})
+
+test('P1 门禁：提交后文档改版 → 批准被拒并要求重新提交（STALE_APPROVAL）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# v1\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  const gate = await callTool(env, 'gate_submit', {
+    gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '提交 v1',
+  }, pm.agent)
+  // 提交后追加 v2（未经审批的内容）
+  await callTool(env, 'doc_write', { mode: 'new-version', docId: written.doc.id, content: '# v2 未审批的改动\n' }, task.agent)
+  const project = await import('../../host/project.js')
+  let caught
+  try {
+    await project.resolveDecisionAction(env.ctx, env.db, { id: gate.decision.id, status: 'approved', confirmed: true }, { root: env.root })
+  } catch (error) { caught = error }
+  assert.ok(caught, '改版后批准应被拒')
+  assert.equal(caught.code, 'STALE_APPROVAL')
+  const decision = env.db.db.prepare('SELECT status FROM decisions WHERE id = ?').get(gate.decision.id)
+  assert.equal(decision.status, 'pending', '被拒后决策应仍为 pending（未落定）')
+})
+
+test('P1 收工：租约被他人接管后不得再收工写库（LEASE_HELD）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const slice = createSlice(env)
+  const first = createTaskSession(env, slice)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'test', resultSummary: '8/8 通过' }, first.agent)
+  assert.ok(evidence.evidence.id)
+  // B 会话抢占租约（A 的租约过期）
+  const second = store.createSession(env.db, {
+    name: '测试-' + slice.key + '-回归', kind: 'task', role: '测试', sliceId: slice.id, dshSessionId: 'dsh-task-2',
+  })
+  env.db.db.prepare('UPDATE leases SET expires_at = ? WHERE slice_id = ?').run(new Date(Date.now() - 60000).toISOString(), slice.id)
+  leases.acquireLease(env.db, { sliceId: slice.id, sessionId: second.id, reason: '接管' })
+  await assertToolError(callTool(env, 'session_finish_task', {
+    handoff: '交接：我以为还能收工', noOutOfScopeChanges: true,
+  }, first.agent), 'LEASE_HELD')
+  const sliceRow = env.db.db.prepare('SELECT status FROM slices WHERE id = ?').get(slice.id)
+  assert.notEqual(sliceRow.status, 'review', '被拒的收工不得改切片状态')
+})
+
+test('P1 收工：返回值取自实际记录（failed → blocked，不是硬编码 review）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  await callTool(env, 'evidence_add', { kind: 'test', resultSummary: '2/3 失败' }, task.agent)
+  const finished = await callTool(env, 'session_finish_task', {
+    status: 'failed', handoff: '交接：回归失败，转缺陷', noOutOfScopeChanges: true,
+  }, task.agent)
+  assert.equal(finished.status, 'failed')
+  assert.equal(finished.slice.status, 'blocked', '返回值应来自 DB 实际状态')
+  const row = env.db.db.prepare('SELECT status FROM slices WHERE id = ?').get(slice.id)
+  assert.equal(row.status, 'blocked')
+  assert.equal(finished.slice.status, row.status, '返回值与库内一致')
+})
+
+// ---------------------------------------------------------------------------
+// 门禁判据（M2 最小切片）：机检不通过 → gate_submit 直接拒绝；通过 → 落一条 check 证据。
+// 这是「门禁第一次由机器判」的那条线，必须锁死拒绝语义。
+// ---------------------------------------------------------------------------
+
+/** 在临时项目里放一个假的仓库检查器（模拟 tools/engineering/checker.mjs）。 */
+function writeChecker(root, body) {
+  const dir = join(root, 'tools', 'engineering')
+  H.ensureDir(dir)
+  const file = join(dir, 'checker.mjs')
+  writeFileSync(file, body, 'utf8')
+  const closeout = join(dir, 'closeout.mjs')
+  writeFileSync(closeout, 'export function checkCloseout() { return { ok: true, issues: [] } }\n', 'utf8')
+}
+
+test('门禁判据：机检 FAIL → gate_submit 直接拒绝并带 issues 原文', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  writeChecker(env.root, [
+    'export async function checkRepository() {',
+    '  return { ok: false, issues: [{ code: "DIR_UNREGISTERED", path: ".project", message: "Directory is not registered." }], counts: {} }',
+    '}',
+  ].join('\n'))
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款 PRD\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  let caught
+  try {
+    await callTool(env, 'gate_submit', { gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '提交' }, pm.agent)
+  } catch (error) { caught = error }
+  assert.ok(caught, '机检失败必须拒绝提交')
+  assert.equal(caught.code, 'GATE_PRECHECK_FAILED')
+  assert.equal(caught.details.issues[0].code, 'DIR_UNREGISTERED', '错误里要带判据原文')
+  const approvals = env.db.db.prepare('SELECT COUNT(*) AS c FROM approvals').get().c
+  assert.equal(Number(approvals), 0, '被拒的门禁不得留下 pending approval')
+  const gates = env.db.db.prepare("SELECT COUNT(*) AS c FROM decisions WHERE kind = 'gate'").get().c
+  assert.equal(Number(gates), 0, '被拒的门禁不得留下决策卡')
+})
+
+test('门禁判据：机检 PASS → 落 check 证据并允许生成 pending approval', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  writeChecker(env.root, [
+    'export async function checkRepository() {',
+    '  return { ok: true, issues: [], counts: { directories: 3, files: 10 } }',
+    '}',
+  ].join('\n'))
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款 PRD\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  const gate = await callTool(env, 'gate_submit', { gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '提交' }, pm.agent)
+  assert.ok(gate.approvalId)
+  assert.equal(gate.machineCheck.ok, true)
+  assert.equal(gate.machineCheck.skipped, false)
+  const checkRows = env.db.db.prepare("SELECT * FROM evidence WHERE kind = 'check'").all()
+  assert.equal(checkRows.length, 1, '机检结果应落一条 evidence')
+  assert.match(String(checkRows[0].result_summary), /机检通过/)
+  const snapshot = JSON.parse(env.db.db.prepare('SELECT snapshot_json FROM approvals WHERE id = ?').get(gate.approvalId).snapshot_json)
+  assert.ok(Array.isArray(snapshot.checks) && snapshot.checks.length >= 1, '审批快照应记录机检明细')
+  assert.ok(snapshot.evidenceIds.includes(checkRows[0].id), '机检证据应进入快照证据集')
+})
+
+test('门禁判据：判据模块跑不起来按失败处理（fail-closed，不静默通过）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  writeChecker(env.root, 'export async function checkRepository() { throw new Error("checker 炸了") }\n')
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# x\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  await assertToolError(callTool(env, 'gate_submit', { gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '提交' }, pm.agent), 'GATE_PRECHECK_FAILED')
+})
+
+test('门禁判据：没有判据文件时跳过机检但如实标注（不假装通过）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# x\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  const gate = await callTool(env, 'gate_submit', { gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '提交' }, pm.agent)
+  assert.equal(gate.machineCheck.skipped, true)
+  assert.equal(gate.machineCheck.reason, 'no-checker-executed')
+  assert.match(String(gate.note), /未发现可用判据/)
+})
+
+// 真实判据：把 lumio 仓库里**现成的** tools/engineering/*.mjs 原样拷进临时项目再提交门禁。
+// 这条用例证明的不是「模型/替身会拒绝」，而是「真实仓库的真实判据会让真实门禁代码拒绝」。
+// 找不到真实仓库时跳过（CI/他机不应因此失败），并在 skip 原因里写明。
+const LUMIO_ENGINEERING = 'C:/Users/oldap/Documents/lumio/tools/engineering'
+
+test('真实判据：lumio 的 checker 让门禁真的红 → gate_submit 拒绝且不留 pending', async (t) => {
+  let entries = []
+  try { entries = await readdir(LUMIO_ENGINEERING) } catch { entries = [] }
+  if (entries.length === 0) { t.skip('本机没有 lumio 仓库（' + LUMIO_ENGINEERING + '）'); return }
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  // 原样拷贝真实判据（checker.mjs + closeout.mjs + policy.json），不做任何改写。
+  const target = join(env.root, 'tools', 'engineering')
+  H.ensureDir(target)
+  for (const name of ['checker.mjs', 'closeout.mjs', 'policy.json']) {
+    try { copyFileSync(join(LUMIO_ENGINEERING, name), join(target, name)) } catch { /* 缺哪个就少哪个 */ }
+  }
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款 PRD\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  let caught
+  try {
+    await callTool(env, 'gate_submit', { gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '拿真实判据过门禁' }, pm.agent)
+  } catch (error) { caught = error }
+  assert.ok(caught, '真实判据红灯时门禁必须拒绝')
+  assert.equal(caught.code, 'GATE_PRECHECK_FAILED')
+  const issues = caught.details && caught.details.issues ? caught.details.issues : []
+  assert.ok(issues.length > 0, '拒绝时必须带判据原文')
+  // lumio 的 checker 对「未在 policy 里登记的目录」报 DIR_UNREGISTERED；项目自己的 .project 正是这种目录。
+  assert.ok(issues.some((issue) => issue.code === 'DIR_UNREGISTERED'), '应带出真实判据码，实际：' + issues.map((i) => i.code).join(','))
+  assert.equal(Number(env.db.db.prepare('SELECT COUNT(*) AS c FROM approvals').get().c), 0, '被拒后不得留 pending approval')
+  assert.equal(Number(env.db.db.prepare("SELECT COUNT(*) AS c FROM decisions WHERE kind = 'gate'").get().c), 0, '被拒后不得留门禁决策卡')
+})
+
+// ---------------------------------------------------------------------------
+// 批准时复跑判据（M2 收尾）：提交时绿 ≠ 批准时绿。
+// 这三例锁住「门禁闭环」——批准的必须是刚刚被机器判过的那份现实。
+// ---------------------------------------------------------------------------
+
+/** 写一个内容可切换的判据（红灯/绿灯由 .verdict 文件决定）。 */
+function writeToggleChecker(root) {
+  const dir = join(root, 'tools', 'engineering')
+  H.ensureDir(dir)
+  writeFileSync(join(root, 'tools', 'engineering', '.verdict'), 'ok', 'utf8')
+  writeFileSync(join(dir, 'checker.mjs'), [
+    "import fs from 'node:fs'",
+    "import path from 'node:path'",
+    'export async function checkRepository(root) {',
+    "  const file = path.join(root, 'tools', 'engineering', '.verdict')",
+    "  let verdict = 'ok'",
+    '  try { verdict = fs.readFileSync(file, "utf8").trim() } catch { /* 默认绿灯 */ }',
+    '  if (verdict === "ok") return { ok: true, issues: [], counts: { files: 1 } }',
+    '  return { ok: false, issues: [{ code: "SUBMITTED_DRIFT", path: ".", message: "提交后仓库变脏" }], counts: { files: 1 } }',
+    '}',
+  ].join('\n'), 'utf8')
+  writeFileSync(join(dir, 'closeout.mjs'), 'export function checkCloseout() { return { ok: true, issues: [] } }\n', 'utf8')
+}
+
+/** 提交一个门禁（此时是绿的），返回 { pm, gate }。 */
+async function submitGreenGate(env) {
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', { mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款 PRD\n' }, task.agent)
+  const evidence = await callTool(env, 'evidence_add', { kind: 'review', resultSummary: '评审通过' }, task.agent)
+  const gate = await callTool(env, 'gate_submit', { gate: 'G1', docIds: [written.doc.id], evidenceIds: [evidence.evidence.id], summary: '提交' }, pm.agent)
+  return { pm, gate, doc: written.doc }
+}
+
+test('批准时复跑判据：提交后变红 → 批准被拒（STALE_PRECHECK），阶段不动', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  writeToggleChecker(env.root)
+  const { gate } = await submitGreenGate(env)
+  // 提交之后仓库变脏
+  writeFileSync(join(env.root, 'tools', 'engineering', '.verdict'), 'fail', 'utf8')
+  const project = await import('../../host/project.js')
+  let caught
+  try {
+    await project.resolveDecisionAction(env.ctx, env.db, { id: gate.decision.id, status: 'approved', confirmed: true }, { root: env.root })
+  } catch (error) { caught = error }
+  assert.ok(caught, '判据变红后批准必须被拒')
+  assert.equal(caught.code, 'STALE_PRECHECK')
+  assert.ok(Array.isArray(caught.issues) && caught.issues.some((i) => i.code === 'SUBMITTED_DRIFT'), '应带判据原文')
+  const decision = env.db.db.prepare('SELECT status FROM decisions WHERE id = ?').get(gate.decision.id)
+  assert.equal(decision.status, 'pending', '被拒后决策应仍 pending')
+  const stage = env.db.db.prepare("SELECT key FROM stages WHERE status = 'active'").get()
+  assert.equal(stage.key, 'S1', '被拒后阶段不得推进')
+  const frozen = env.db.db.prepare("SELECT COUNT(*) AS c FROM doc_versions WHERE frozen = 1").get().c
+  assert.equal(Number(frozen), 0, '被拒后不得冻结任何文档')
+})
+
+test('批准时复跑判据：提交后仓库规模变化（hash 漂移）→ 批准被拒', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  // 判据读 .count 决定 counts（结论一直是 ok，但 hash 会变）
+  const dir = join(env.root, 'tools', 'engineering')
+  H.ensureDir(dir)
+  writeFileSync(join(env.root, 'tools', 'engineering', '.count'), '1', 'utf8')
+  writeFileSync(join(dir, 'checker.mjs'), [
+    "import fs from 'node:fs'",
+    "import path from 'node:path'",
+    'export async function checkRepository(root) {',
+    "  let files = 1",
+    '  try { files = Number(fs.readFileSync(path.join(root, "tools", "engineering", ".count"), "utf8").trim()) } catch { /* 默认 1 */ }',
+    '  return { ok: true, issues: [], counts: { files } }',
+    '}',
+  ].join('\n'), 'utf8')
+  writeFileSync(join(dir, 'closeout.mjs'), 'export function checkCloseout() { return { ok: true, issues: [] } }\n', 'utf8')
+  const { gate } = await submitGreenGate(env)
+  // 仍绿，但判定依据变了
+  writeFileSync(join(env.root, 'tools', 'engineering', '.count'), '42', 'utf8')
+  const project = await import('../../host/project.js')
+  let caught
+  try {
+    await project.resolveDecisionAction(env.ctx, env.db, { id: gate.decision.id, status: 'approved', confirmed: true }, { root: env.root })
+  } catch (error) { caught = error }
+  assert.ok(caught, '结果漂移后批准必须被拒')
+  assert.equal(caught.code, 'STALE_PRECHECK')
+  assert.ok(Array.isArray(caught.issues) && caught.issues.some((i) => i.reason === 'result-changed'), '应报告 result-changed')
+})
+
+test('批准时复跑判据：提交后仍一致 → 放行且把复跑结果写进审批', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  projectWithStages(env)
+  writeToggleChecker(env.root)
+  const { gate } = await submitGreenGate(env)
+  const project = await import('../../host/project.js')
+  const result = await project.resolveDecisionAction(env.ctx, env.db, { id: gate.decision.id, status: 'approved', confirmed: true }, { root: env.root })
+  assert.equal(result.decision.status, 'approved')
+  assert.ok(result.actions && result.actions.precheck, '批准动作应带回判据复跑结果')
+  assert.equal(result.actions.precheck.ok, true)
+  assert.equal(result.actions.precheck.skipped, false)
+  assert.ok(Array.isArray(result.actions.precheck.checks) && result.actions.precheck.checks.length >= 1)
+  const approval = env.db.db.prepare('SELECT snapshot_json FROM approvals WHERE decision_id = ? AND status = ?').get(gate.decision.id, 'approved')
+  const snapshot = JSON.parse(approval.snapshot_json)
+  assert.ok(snapshot.precheck && snapshot.precheck.ranAt, '审批行应记录复跑时间')
+  const gateEvent = env.db.listEvents({ limit: 300 }).filter((e) => e.kind === 'gate/approve').pop()
+  assert.ok(gateEvent && gateEvent.payload && gateEvent.payload.precheck, 'gate/approve 事件应带判据复跑摘要')
 })
 
 test('2k 上下文：预算内不降级；构造大切片内容时降级且硬上限 2000', (t) => {

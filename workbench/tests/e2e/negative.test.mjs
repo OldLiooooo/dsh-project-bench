@@ -322,6 +322,13 @@ export async function makeSuite() {
           options: [{ id: 'approve', label: '批准' }, { id: 'reject', label: '驳回' }], recommended: 'approve',
           consequences: '驳回则重写', irreversible: false, stage: 'S1', gate: 'G1', createdBy: null,
         })
+        // 与 gate_submit 一致：先把「提交快照」写进 pending approval 行。
+        // 批准时按快照冻结/导出，不再按 stage/slice 现场重查（否则提交 A 会被批准成 B）。
+        const versionRow = db.db.prepare('SELECT content_hash FROM doc_versions WHERE document_id = ? ORDER BY version DESC LIMIT 1').get(doc.id)
+        db.db.prepare('INSERT INTO approvals(id, project_id, stage, gate, decision_id, status, evidence_ids_json, snapshot_json, approved_by, approved_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run('appr_neg_gate', db.projectId, 'S1', 'G1', gate.id, 'pending', '[]',
+            JSON.stringify({ decisionId: gate.id, gate: 'G1', stage: 'S1', docIds: [doc.id], docVersions: [{ docId: doc.id, version: 1, hash: versionRow ? versionRow.content_hash : null }], evidenceIds: [] }),
+            null, null)
         const response = await fx.post('/project-workbench/api/decision', { root: fx.root, id: gate.id, status: 'approved', rationale: '面板批准' })
         H.expectEqual(response.status, 200, '门禁批准应 200: ' + response.body.slice(0, 400))
         const payload = JSON.parse(response.body)

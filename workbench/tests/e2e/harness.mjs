@@ -10,6 +10,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import process from 'node:process'
 
 export const E2E_DIR = dirname(fileURLToPath(import.meta.url))
+
+// M0 之后权威数据默认落在 $DSH_HOME/storages/（agent 物理碰不到的物理单写）。
+// 但**测试进程本身**跑在会话沙箱里，写 ~/.dsh 会 EPERM。测试必须把 DSH_HOME 指到工作区内，
+// 否则测的不是插件行为，而是沙箱行为。真实 Host 插件进程不受此限制（裸 node:fs）。
+// 想验证「local 兼容模式」的用例可以自行覆盖 PROJECT_WORKBENCH_STORE。
+if (!process.env.DSH_HOME || process.env.DSH_HOME === '') {
+  process.env.DSH_HOME = join(dirname(fileURLToPath(import.meta.url)), '.artifacts', 'dshhome')
+}
+if (process.env.PROJECT_WORKBENCH_STORE === undefined) {
+  // 测试默认沿用生产语义（home），只是把 home 指到工作区内。
+}
 export const WORKBENCH_ROOT = resolve(E2E_DIR, '..', '..')
 export const WORKSPACE_ROOT = resolve(WORKBENCH_ROOT, '..')
 export const ARTIFACTS_DIR = join(E2E_DIR, '.artifacts')

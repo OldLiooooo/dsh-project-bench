@@ -28,6 +28,15 @@ export const DEFAULT_STATE_DIR = join(WORKBENCH_ROOT, 'tests', 'e2e', '.artifact
 export const DEFAULT_EXE = process.env.DSH_DESKTOP_EXE || 'C:/Users/oldap/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe'
 export const DEFAULT_CLI = process.env.DSH_DESKTOP_CLI || 'C:/Users/oldap/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'
 
+/**
+ * app.asar 内的文件对**普通 node** 不可见（existsSync 返回 false），
+ * 只有 Electron（含 ELECTRON_RUN_AS_NODE）能透过 asar 虚拟文件系统读到。
+ * 因此对 asar 路径不能预检存在性——交给真正启动时的 Electron 去报错。
+ */
+function isAsarPath(file) {
+  return /[\\/]app\.asar[\\/]/i.test(String(file))
+}
+
 export class InstanceError extends Error {
   constructor(code, message, details) {
     super(message)
@@ -197,6 +206,8 @@ export async function startInstance(options = {}) {
   const force = options.force === true
 
   for (const [label, file] of [['exe', exe], ['cli', cli]]) {
+    // exe 必须真实存在；cli 若在 app.asar 内，普通 node 看不到，跳过预检（启动时由 Electron 判定）。
+    if (label === 'cli' && isAsarPath(file)) continue
     if (!existsSync(file)) throw new InstanceError('ENV_MISSING', '找不到 DSH ' + label + ': ' + file + '（可用环境变量 DSH_DESKTOP_EXE / DSH_DESKTOP_CLI 覆盖）')
   }
   if (!existsSync(home)) ensureDir(home)

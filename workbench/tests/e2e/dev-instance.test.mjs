@@ -119,6 +119,17 @@ export async function makeSuite() {
     H.expectEqual(I.main(['check', '--home', devhome, '--profile', 'web']), 0, 'check 退出码应为 0')
   })
 
+  add('check-syntax: 语法门禁不被 tests/probes 劫持（探针必须单独跑）', async () => {
+    // 回归背景：探针在模块顶层执行并 process.exit，被 check-syntax import 会劫持退出码，
+    // 让语法检查永远 PASS。这条用例锁住「扫描列表里没有 probes / 报告由检查器自己打印」。
+    const { listSourceFiles } = await import('../../scripts/check-syntax.mjs')
+    const files = listSourceFiles()
+    const probeFiles = files.filter((file) => file.includes('probes'))
+    H.expectEqual(probeFiles.length, 0, 'probes 目录不得进入扫描列表: ' + probeFiles.join(','))
+    H.expect(files.length > 0, '扫描列表不应为空')
+    H.expect(files.some((file) => file.endsWith('client.js')), '扫描列表应包含 client.js')
+  })
+
   add('dev-install: desktop 保留 profile 拒绝 CLI 安装 + plan/instructions 正确', async () => {
     const plan = I.planInstall({ profile: 'desktop' })
     H.expectEqual(plan.reservedProfile, true, 'desktop 应标记为保留 profile')

@@ -13,6 +13,8 @@
 | `negative.test.mjs` | 契约 §11.3 负向测试：API 未鉴权 401/403、未鉴权不触注册表、agent 无代批决策工具、重复 active 会话、frozen、租约、seq 无空洞；HTTP 集成（init/snapshot/timeline/SSE、不可逆决策 confirmed、门禁冻结+导出+阶段推进） |
 | `ui-client.test.mjs` | Client UI 契约自测：4 个槽位注册、i18n zh/en 字典、__pure 纯变换、组件存在性（不需要浏览器） |
 | `instance-http.mjs` | 真实 52999 隔离实例验证：页面/preload/client bundle 可获取且可解析、未鉴权 401/403、/projects、/snapshot、/timeline、SSE |
+| `live-inprocess-instance.mjs` | **真实 DSH 实例（进程内启动，不依赖 spawn）**：起真 web profile → 装插件进 profile → 真 token 换 cookie → 页面/preload/鉴权/API/SSE 全链路 15 断言 |
+| `live-governance-http.mjs` | **真实实例上的治理闭环**：真实 lumio 副本 → 换阶段模板 → 真实判据红灯 → 治理转绿 → 门禁（真实 tools 服务执行）→ 真实 HTTP 批准 → 阶段推进。13 断言 |
 | `../../tests/unit/acceptance.test.mjs` | 契约 §11.1/§11.5 单测：schema/事件 seq/事务回滚、文档版本链/冻结/检索/导出重生成/inbox 导入、租约、决策不可逆、2k 预算与降级 |
 | `../scripts/check-syntax.mjs` | 对所有 workbench `*.js|*.mjs` 做「可解析」检查（等价 node --check；bash 不可用时用） |
 | `../scripts/dev-instance.mjs` | 隔离 DSH 实例管理：start/stop/restart/status/wait/url/cookie/logs（DSH_HOME=`.devhome`，端口 52999） |
