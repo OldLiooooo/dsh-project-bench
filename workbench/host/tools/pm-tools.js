@@ -11,6 +11,16 @@ import {
   notifyWrite, currentStageOf, exportMapOf, rootOf,
 } from './spec-helpers.js'
 
+/** 规范化截止时间：接受 ISO 字符串；非法则报错而不是静默丢。 */
+function normalizeDeadline(value) {
+  if (value === undefined) return undefined
+  const at = Date.parse(String(value))
+  if (!Number.isFinite(at)) {
+    throw fail('INVALID', 'deadline 必须是可解析的时间（ISO 8601，如 2026-11-25T18:00:00+08:00）：' + value)
+  }
+  return new Date(at).toISOString()
+}
+
 function minimalSession(session) {
   return {
     id: session.id,
@@ -134,6 +144,54 @@ export const sliceScope = {
   },
 }
 
+/**
+ * slice_verify：验收切片（Verified Done）。
+ *
+ * 为什么是独立工具而不是 slice_update 的一个状态值：
+ *   状态更新是「改字段」，验收是「签字」—— 后者要有签名人、要独立于实现者、要落独立事件。
+ *   把两者合成一个工具，模型就会把它当状态用（"调一下 slice_update 设成 verified"），
+ *   而那正是设计要防的「Verified Done 退化成又一个 done」。
+ *
+ * 谁能调：PM（代表用户/独立验收者）与 QA 会话（project-qa preset）。
+ * 实现该切片的普通任务会话**不能**调（工具层 actors 里没有 task，且领域层还有 SELF_VERIFICATION_DENIED 双保险）。
+ */
+export const sliceVerify = {
+  name: 'slice_verify',
+  description: '验收切片（把 review/done 置为 verified，并记录验收人）。这是「唯一进度口径」的写入点：设计 §6.2 的进度、吞吐、一次通过率都只认 verified。硬约束：验收人不能是该切片最近一次实现会话（建造者不验收）；verified 是终态，不可回退。',
+  parameters: params({
+    sliceId: S('切片 id（与 sliceKey 二选一）'),
+    sliceKey: S('切片 key（与 sliceId 二选一）'),
+    verifiedBy: S('验收人（人名/身份标识，必填；会写进 verified_by 并计入审批签名）'),
+    verifierSession: S('验收会话的 dshSessionId（可选但强烈建议：只有给了它才能做「建造者不验收」的强校验）'),
+    resultSummary: S('验收结论摘要（验了什么、怎么验的、有没有遗留问题）'),
+  }, ['verifiedBy']),
+  actors: ['pm', 'qa'],
+  execute: async function (args, _exec, actor, deps) {
+    const slice = resolveSlice(deps, actor, { sliceId: optionalText(args.sliceId), sliceKey: optionalText(args.sliceKey) })
+    if (actor.kind === 'task' || actor.kind === 'qa') {
+      if (slice.id !== actor.sliceId) throw fail('PERMISSION_DENIED', '验收会话只能验收自己绑定的切片：' + (actor.sliceId || '(无)'))
+    }
+    const verifiedBy = requireText(args.verifiedBy, 'verifiedBy')
+    // verifierSession 默认取当前会话：否则「谁验的」与「哪个会话验的」会脱节，建造者校验失效。
+    const verifierSession = optionalText(args.verifierSession) || actor.dshSessionId
+    const result = deps.store.verifySlice(actor.db, {
+      id: slice.id,
+      verifiedBy: verifiedBy,
+      verifierSession: verifierSession,
+      resultSummary: optionalText(args.resultSummary),
+      role: actor.role,
+    })
+    notifyWrite(deps, actor)
+    return {
+      slice: {
+        id: result.slice.id, key: result.slice.key, title: result.slice.title,
+        status: result.slice.status, verifiedBy: result.slice.verifiedBy, verifiedAt: result.slice.verifiedAt,
+      },
+      note: '切片已验收。进度只统计 verified 状态的切片；verified 是终态，返工请开新切片。',
+    }
+  },
+}
+
 /** task_create：建任务（PM）。 */
 export const taskCreate = {
   name: 'task_create',
@@ -223,7 +281,7 @@ export const sessionSendTask = {
   description: '向任务会话发消息（补充信息、纠偏、追问）。需要任务会话仍 active；已收工的会话不能再发。',
   parameters: params({
     sessionId: S('项目会话 id（可选）'),
-    name: S('任务会话名（可选，如 码农-支付退款-实现）'),
+    name: S('会话名（可选，如 码农-支付退款-实现 / 验收-支付退款-验收）'),
     dshSessionId: S('DSH 会话 id（可选）'),
     message: S('消息正文'),
   }, ['message']),
@@ -235,12 +293,12 @@ export const sessionSendTask = {
     else if (args.dshSessionId) target = deps.store.findSessionByDshId(actor.db, args.dshSessionId)
     else if (args.name) {
       const wanted = String(args.name).trim()
-      const rows = deps.store.listSessions(actor.db, { kind: 'task' })
+      const rows = deps.store.listSessions(actor.db, { kind: 'task' }).concat(deps.store.listSessions(actor.db, { kind: 'qa' }))
       target = rows.find(function (row) { return row.name === wanted && row.status === 'active' }) || rows.find(function (row) { return row.name === wanted })
     } else throw fail('INVALID', '需要 sessionId / name / dshSessionId 之一')
-    if (!target) throw fail('NOT_FOUND', '任务会话不存在')
-    if (target.kind !== 'task') throw fail('INVALID', '目标不是任务会话：' + target.name)
-    if (target.status !== 'active') throw fail('INVALID', '任务会话已结束（' + target.status + '），不能再发消息：' + target.name)
+    if (!target) throw fail('NOT_FOUND', '任务/验收会话不存在')
+    if (target.kind !== 'task' && target.kind !== 'qa') throw fail('INVALID', '目标不是任务或验收会话：' + target.name)
+    if (target.status !== 'active') throw fail('INVALID', '会话已结束（' + target.status + '），不能再发消息：' + target.name)
     if (!target.dshSessionId) throw fail('INVALID', '任务会话没有绑定 DSH 会话（可能尚未启动）：' + target.name)
     const sender = _exec && _exec.agent
     if (!sender || !ctx.subagents || typeof ctx.subagents.sendMessage !== 'function') throw fail('UNAVAILABLE', 'subagents 服务不可用')
@@ -251,6 +309,93 @@ export const sessionSendTask = {
       throw fail('DELIVERY_FAILED', '消息投递失败：' + detail, { sessionId: target.id, dshSessionId: target.dshSessionId })
     }
     return { delivered: true, session: minimalSession(target), messageChars: message.length }
+  },
+}
+
+/**
+ * session_spawn_qa：拉起独立验收会话（project-qa preset）。
+ *
+ * 为什么必须是独立工具而不是 session_spawn_task(role='测试')：
+ *   任务会话带租约、能写文件、能改文档 —— 用它做验收，「建造者不验收」就只剩角色卡里一句话。
+ *   验收会话应当：不占租约、只读工作区、只能 evidence_add + slice_verify。
+ *
+ * 一个切片同时只允许一个 active 验收会话（避免同一交付被两个"验收者"给出矛盾结论）。
+ */
+export const sessionSpawnQa = {
+  name: 'session_spawn_qa',
+  description: '拉起独立验收会话（project-qa）：不写文件、不占租约、只读工作区，产出验收证据并可调 slice_verify。用于里程碑门禁前的独立验证——「建造者不验收」的机制化落地。',
+  parameters: params({
+    sliceId: S('切片 id（与 sliceKey 二选一）'),
+    sliceKey: S('切片 key（与 sliceId 二选一）'),
+    action: S('动作短语（如 退款验收 / 回归复验）'),
+    prompt: S('验收交代：验什么、按什么标准、已知风险与重点回归面'),
+    provider: S('子会话 provider（可选，默认继承 PM）'),
+    model: S('子会话 model（可选，默认继承 PM）'),
+  }, ['action', 'prompt']),
+  actors: ['pm'],
+  execute: async function (args, _exec, actor, deps, ctx) {
+    const slice = resolveSlice(deps, actor, { sliceId: optionalText(args.sliceId), sliceKey: optionalText(args.sliceKey) })
+    const action = requireText(args.action, 'action')
+    const brief = requireText(args.prompt, 'prompt')
+    const existing = deps.store.listSessions(actor.db, { kind: 'qa', status: 'active', sliceId: slice.id })
+    if (existing.length > 0) {
+      throw fail('DUPLICATE_ACTIVE_SESSION', '该切片已有 active 验收会话：' + existing[0].name + '（先收工或换切片）', {
+        sessionId: existing[0].id, name: existing[0].name,
+      })
+    }
+    const name = '验收-' + slice.key + '-' + action
+    const dshSessionId = newId('qa')
+    const session = deps.store.createSession(actor.db, {
+      name: name,
+      kind: 'qa',
+      role: '测试',
+      sliceId: slice.id,
+      dshSessionId: dshSessionId,
+      parentSessionId: actor.session.id,
+      provider: optionalText(args.provider) || undefined,
+      model: optionalText(args.model) || undefined,
+      context: { action: action, brief: brief.slice(0, 8000), spawnedBy: actor.dshSessionId, qa: true },
+    })
+    const text = [
+      '【独立验收会话】切片「' + slice.title + '」(' + slice.key + ')',
+      '你的职责：独立验证这次交付是否达到验收标准。**不要改产品代码、不要改测试把红的改绿**。',
+      '验收标准：' + (slice.acceptance && Object.keys(slice.acceptance).length > 0 ? JSON.stringify(slice.acceptance) : '（切片未声明验收标准，请按 PM 交代与文档判断）'),
+      '',
+      'PM 交代：',
+      brief,
+      '',
+      'available 工具：project_status / project_brief / doc_list / doc_get / task_list / slice_list / evidence_add / slice_verify。',
+      '做完后：evidence_add 记录可复核证据（原样贴命令与输出摘要），再调 slice_verify（verifiedBy 写人名）。',
+      '如果没通过：**不要** slice_verify，用 evidence_add 记录失败证据，并在交接里写清缺陷与复现步骤。',
+    ].join('\n')
+    try {
+      await ctx.subagents.startActivation({
+        delivery: 'parent',
+        provider: 'spawn',
+        childId: dshSessionId,
+        label: name,
+        request: {
+          prompt: [{ type: 'text', text: text }],
+          parent: _exec && _exec.agent,
+          agentPreset: 'project-qa',
+        },
+        signal: _exec && _exec.signal,
+      })
+    } catch (error) {
+      const detail = String(error && error.message ? error.message : error)
+      try {
+        deps.store.endSession(actor.db, { id: session.id, status: 'failed', failureCode: 'SPAWN_FAILED', failureDetail: detail.slice(0, 500) })
+      } catch (cleanupError) { /* 保留原始错误 */ }
+      throw fail('SPAWN_FAILED', '拉起验收会话失败：' + detail, { sessionId: session.id })
+    }
+    notifyWrite(deps, actor)
+    return {
+      session: minimalSession(session),
+      dshSessionId: dshSessionId,
+      name: name,
+      slice: { id: slice.id, key: slice.key, title: slice.title },
+      note: '验收会话不占租约、不写文件；它产出证据并可调 slice_verify。',
+    }
   },
 }
 
@@ -268,6 +413,8 @@ export const decisionCreate = {
     sliceId: S('关联切片 id（可选）'),
     stage: S('关联阶段 key（可选，默认当前阶段）'),
     gate: S('关联门禁 key（可选）'),
+    deadline: S('答复截止（ISO 时间，如 2026-11-25T18:00:00+08:00）。设计 §6.3 的超时策略靠它：非不可逆超时用推荐值继续，不可逆超时挂起并提醒'),
+    defaultOption: S('超时后默认采用的选项 value（可选；只有非不可逆时才有意义）'),
   }, ['title', 'question', 'options']),
   actors: ['pm'],
   execute: async function (args, _exec, actor, deps) {
@@ -284,10 +431,18 @@ export const decisionCreate = {
       sliceId: optionalText(args.sliceId),
       stage: stage,
       gate: optionalText(args.gate),
+      deadline: normalizeDeadline(optionalText(args.deadline)),
+      defaultOption: optionalText(args.defaultOption),
       createdBy: actor.dshSessionId,
     })
     notifyWrite(deps, actor)
-    return { decision: decision, note: '决策卡已加入待决策；等用户在面板答复，不要代批。' }
+    const notes = ['决策卡已加入待决策；等用户在面板答复，不要代批。']
+    if (decision.deadline) {
+      notes.push('截止 ' + decision.deadline + '（逾期会在概览与决策收件箱标红）。')
+      if (decision.irreversible) notes.push('不可逆决策逾期不自动采用默认值，必须人来拍板（设计 §6.3）。')
+      else if (decision.defaultOption) notes.push('非不可逆：逾期可按默认值 ' + decision.defaultOption + ' 继续，并在报告里标注这是假设。')
+    }
+    return { decision: decision, note: notes.join(' ') }
   },
 }
 
@@ -426,6 +581,74 @@ export const gateSubmit = {
   },
 }
 
+/**
+ * period_roll：推进项目周期（设计 §5.4 的两周周期 + cooldown）。
+ *
+ * 为什么需要显式工具而不是日历自动滚动：
+ *   「这个周期做了什么」是复盘与指标的分母。自动按日历滚动会把「跨零点的提交」
+ *   归到哪个周期变成一件靠时钟猜的事；显式推进则是可审计动作（有人按了、写进了时间线）。
+ *
+ * 记录形态（project_meta）：
+ *   period.current  = '2026-W47'（可读标识）
+ *   period.index    = 12（自项目初始化起的第几个周期，单调，用于趋势）
+ *   period.startedAt / period.endedAt
+ *   period.lengthDays（默认 14，来自 project.json.period.lengthDays 或 14）
+ */
+export const periodRoll = {
+  name: 'period_roll',
+  description: '推进项目周期：结束当前周期并开启下一个（写 project_meta 与 period/roll 事件）。周期是「每周期验证吞吐」「appetite 偏差」等指标的分母；不自动滚动是刻意的——推进必须是可审计的显式动作。',
+  parameters: params({
+    label: S('新周期标识（可选，如 2026-W48；不给则按 index 生成）'),
+    note: S('本周期结论/复盘摘要（可选，会写进事件）'),
+    lengthDays: N('新周期长度（天，可选；默认沿用或 14）'),
+  }, []),
+  actors: ['pm'],
+  execute: async function (args, _exec, actor, deps) {
+    const db = actor.db
+    const currentIndex = Number(db.getMeta('period.index') || 0)
+    const nextIndex = currentIndex + 1
+    const at = nowIso()
+    const lengthDays = Number.isFinite(Number(args.lengthDays)) && Number(args.lengthDays) > 0
+      ? Number(args.lengthDays)
+      : Number(db.getMeta('period.lengthDays') || 14)
+    const label = optionalText(args.label) || ('P' + String(nextIndex).padStart(2, '0'))
+    const previous = {
+      current: db.getMeta('period.current') || null,
+      index: currentIndex || null,
+      startedAt: db.getMeta('period.startedAt') || null,
+    }
+    // 周期结束时把「这一周期验了多少」定格下来：否则推进后就再也算不出历史吞吐。
+    const verifiedInPeriod = Number(db.db.prepare(
+      "SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND kind = 'slice/verify' AND at >= ?"
+    ).get(db.projectId, previous.startedAt || '0000').n || 0)
+    db.tx(function () {
+      db.setMeta('period.current', label)
+      db.setMeta('period.index', nextIndex)
+      db.setMeta('period.startedAt', at)
+      db.setMeta('period.lengthDays', lengthDays)
+      if (previous.current) db.setMeta('period.lastEndedAt', at)
+      db.appendEvent({
+        kind: 'period/roll',
+        subjectType: 'project',
+        subjectId: db.projectId,
+        actorSession: actor.dshSessionId,
+        role: actor.role,
+        payload: {
+          from: previous.current, to: label, index: nextIndex,
+          lengthDays: lengthDays, verifiedInPreviousPeriod: verifiedInPeriod,
+          note: optionalText(args.note),
+        },
+      })
+    })
+    notifyWrite(deps, actor)
+    return {
+      period: { current: label, index: nextIndex, startedAt: at, lengthDays: lengthDays },
+      previous: { ...previous, verifiedCount: verifiedInPeriod },
+      note: '周期已推进。历史周期的验证吞吐已定格在上一条 period/roll 事件的 payload 里。',
+    }
+  },
+}
+
 /** export_project：PM 导出文档或全量快照。 */
 export const exportProject = {
   name: 'export_project',
@@ -534,5 +757,5 @@ export const docExport = {
 }
 
 export function createPmTools(_ctx, _deps) {
-  return [projectInit, sliceCreate, sliceUpdate, sliceScope, taskCreate, sessionSpawnTask, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport]
+  return [projectInit, sliceCreate, sliceUpdate, sliceScope, sliceVerify, taskCreate, sessionSpawnTask, sessionSpawnQa, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport, periodRoll]
 }

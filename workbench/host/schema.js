@@ -5,7 +5,8 @@
 //   v2  W1：append-only 触发器 + 唯一事实约束 + 状态枚举
 //   v3  decisions.answer（人到底选了哪个选项）
 //   v4  失败状态 / 租约栅栏 / 切片作用域 / 导出 outbox / 身份（见 §V4）
-export const SCHEMA_VERSION = 4
+//   v5  Verified Done：slices 增 verified 状态与验收人 / 证据增 verified_at；触发器防「未验证冒充已完成」
+export const SCHEMA_VERSION = 5
 
 const STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)",
@@ -79,6 +80,12 @@ export function migrate(db, at = new Date().toISOString()) {
     migrateV4(db)
     db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(4, at)
   }
+  if (current < 5) {
+    // v4 -> v5：Verified Done。设计 §6.2 定「唯一进度口径 = 已验证完成」，但 v4 的 slices 状态枚举里
+    // 根本没有 verified —— 进度、验证吞吐、一次验收通过率全都算不出来（没有分母）。
+    migrateV5(db)
+    db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(5, at)
+  }
   if (current < SCHEMA_VERSION) {
     db.prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(SCHEMA_VERSION, at)
   }
@@ -146,6 +153,49 @@ export function migrateV4(db) {
     const row = db.prepare('SELECT COUNT(*) AS n FROM leases').get()
     summary.backfilled.leasesEpoch = Number(row && row.n ? row.n : 0)
   }
+  return summary
+}
+
+/**
+ * v5 迁移：Verified Done —— 把「已验证完成」变成数据模型里的一等状态。
+ *
+ * 为什么必须有这一步：设计 §6.2 定「唯一进度口径 = 已验证完成」，但 v4 的 slices 状态枚举是
+ * open/in_progress/review/blocked/done/archived/cut，**没有 verified**。于是：
+ *   - 进度百分比没有分子（done ≠ verified）；
+ *   - evidence.verified_by 列存在却从没被写入，「谁验收的」不可追溯；
+ *   - 「建造者不验收」只靠角色卡里一句提示词 —— 而提示词不算约束（设计逻辑 §8 第 1 条）。
+ *
+ * 语义约定（不做静默映射）：
+ *   - 存量 done 行**保持 done**，不自动升级成 verified。done = 交付方自认完成；verified = 独立验收通过。
+ *     自动升级等于伪造验收记录，而 events 是 append-only、事后无法纠正。
+ *   - verified 是终态：guard_verified_slice_terminal 禁止 verified 回退（返工走新切片或 archived）。
+ *
+ * 幂等：全部按列存在性跳过。
+ * @returns {{addedColumns:string[], backfilled:{verified:number}}}
+ */
+export function migrateV5(db) {
+  const summary = { addedColumns: [], backfilled: { verified: 0 } }
+  const columnsOf = (table) => db.prepare('PRAGMA table_info(' + table + ')').all().map((row) => String(row.name))
+  const addColumn = (table, column, ddl) => {
+    if (columnsOf(table).includes(column)) return false
+    db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + ddl)
+    summary.addedColumns.push(table + '.' + column)
+    return true
+  }
+  // 切片：谁在什么时候、从哪个会话验收的。
+  addColumn('slices', 'verified_by', 'verified_by TEXT')
+  addColumn('slices', 'verified_at', 'verified_at TEXT')
+  addColumn('slices', 'verified_session', 'verified_session TEXT')
+  // 证据：验收人（v4 只有列、没有写入点，见 BACKLOG B5）。
+  addColumn('evidence', 'verified_at', 'verified_at TEXT')
+  // 决策：超时后默认采用的选项（设计 §6.3；deadline 列 v1 就有，但一直没有写入入口与消费方）。
+  addColumn('decisions', 'default_option', 'default_option TEXT')
+  // 周期（设计 §5.4）：period 元数据此前从未被写入，route 图/燃起图没有分母。
+  // 这里只补「能存」；推进周期是显式动作（period_roll），不做日历自动滚动 —— 自动滚动会让
+  // 「这一周期做了什么」变成不可复核的推测。
+  // 存量统计（只报告，不改数据）。
+  const row = db.prepare("SELECT COUNT(*) AS n FROM slices WHERE status = 'verified'").get()
+  summary.backfilled.verified = Number(row && row.n ? row.n : 0)
   return summary
 }
 
@@ -224,7 +274,18 @@ export const GUARD_TRIGGERS = [
   // 已完成的导出意图不可回退成 pending：否则补偿会无限重放已成功的写。
   `CREATE TRIGGER IF NOT EXISTS guard_outbox_done_terminal BEFORE UPDATE OF status ON export_outbox
    WHEN OLD.status = 'done' AND NEW.status != 'done'
-   BEGIN SELECT RAISE(ABORT, 'OUTBOX_TERMINAL'); END`
+   BEGIN SELECT RAISE(ABORT, 'OUTBOX_TERMINAL'); END`,
+  // ---- v5：Verified Done ----
+  // 已验收的切片不可回退成未验收：验收是一次人/独立验证者签的字，
+  // 允许回退等于允许「悄悄撤回」一次验收结论，而 events 是 append-only、撤不回记录。
+  // 返工的正确路径是：新切片，或先 archived 再开新切片。
+  `CREATE TRIGGER IF NOT EXISTS guard_verified_slice_terminal BEFORE UPDATE OF status ON slices
+   WHEN OLD.status = 'verified' AND NEW.status != 'verified'
+   BEGIN SELECT RAISE(ABORT, 'SLICE_VERIFIED_TERMINAL'); END`,
+  // 未验收不能冒充已验证：verified_by 为空时不允许写 verified（防止代码路径漏填）。
+  `CREATE TRIGGER IF NOT EXISTS guard_verified_requires_signer BEFORE UPDATE OF status ON slices
+   WHEN NEW.status = 'verified' AND (NEW.verified_by IS NULL OR TRIM(NEW.verified_by) = '')
+   BEGIN SELECT RAISE(ABORT, 'VERIFY_REQUIRES_SIGNER'); END`
 ]
 
 /** v2 追加的唯一索引：一个事实一行。 */
@@ -236,7 +297,9 @@ export const GUARD_INDEXES = [
 
 /** v2 的状态枚举：每个实体一张白名单，迁移时用它校验存量数据。 */
 export const STATUS_ENUMS = {
-  slices: ['open', 'in_progress', 'review', 'blocked', 'done', 'archived', 'cut'],
+  // v5 加 verified：交付方自认完成（done）与独立验收通过（verified）是两件事，
+  // 设计 §6.2 的「唯一进度口径」只认后者。
+  slices: ['open', 'in_progress', 'review', 'blocked', 'done', 'verified', 'archived', 'cut'],
   tasks: ['pending', 'in_progress', 'review', 'blocked', 'done', 'failed'],
   decisions: ['pending', 'approved', 'rejected', 'superseded', 'hang'],
   approvals: ['pending', 'approved', 'rejected'],

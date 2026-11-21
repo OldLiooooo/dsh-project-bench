@@ -642,7 +642,7 @@ test('重开 DB：自动推导 projectId/root，数据保留，迁移幂等', fu
 
 const { GUARD_TRIGGERS, STATUS_ENUMS, auditStatuses } = schema
 
-test('W1: 迁移到 v2/v3/v4 后触发器与唯一索引到位', function () {
+test('W1: 迁移到 v2..v5 后触发器与唯一索引到位', function () {
   withProject(function ({ db }) {
     const triggers = db.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name").all().map(function (row) { return row.name })
     assert.equal(triggers.length, GUARD_TRIGGERS.length)
@@ -651,14 +651,16 @@ test('W1: 迁移到 v2/v3/v4 后触发器与唯一索引到位', function () {
       'guard_decisions_terminal', 'guard_approvals_terminal',
       // v4：栅栏令牌单调 + 任务会话终态 + 审批代次单调 + outbox 终态
       'guard_lease_epoch_monotonic', 'guard_task_session_terminal',
-      'guard_approval_epoch_monotonic', 'guard_outbox_done_terminal']) {
+      'guard_approval_epoch_monotonic', 'guard_outbox_done_terminal',
+      // v5：Verified Done —— 验收是终态，且必须有签名人
+      'guard_verified_slice_terminal', 'guard_verified_requires_signer']) {
       assert.ok(triggers.includes(name), '缺触发器 ' + name)
     }
     const indexes = db.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ux_%'").all().map(function (row) { return row.name })
     assert.ok(indexes.includes('ux_artifacts_fact'), '缺 artifacts 唯一索引')
     assert.ok(indexes.includes('ux_evidence_fact'), '缺 evidence 唯一索引')
     assert.equal(Number(db.db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v), schema.SCHEMA_VERSION)
-    assert.equal(schema.SCHEMA_VERSION, 4)
+    assert.equal(schema.SCHEMA_VERSION, 5)
   })
 })
 
@@ -678,7 +680,9 @@ test('v4 迁移：老库（v3）升级后新增列与表都在，且守卫被补
   first.db.exec('DROP TABLE approval_signers')
   first.db.exec('DROP TRIGGER IF EXISTS guard_task_session_terminal')
   first.db.exec('DROP TRIGGER IF EXISTS guard_lease_epoch_monotonic')
-  first.db.exec('DELETE FROM schema_migrations WHERE version = 4')
+  // 模拟 v3 库：v4 与之后的版本记录都要删掉。迁移闸门按 MAX(version) 判断，
+  // 只删 4 不删 5 会让 MAX 仍是 5，v4/v5 迁移都不会重跑（这是测试构造老库的方式问题，不是迁移缺陷）。
+  first.db.exec('DELETE FROM schema_migrations WHERE version >= 4')
   first.close()
 
   const reopened = new ProjectDb(file, { root })
@@ -691,12 +695,13 @@ test('v4 迁移：老库（v3）升级后新增列与表都在，且守卫被补
     }
     const triggers = reopened.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all().map((row) => String(row.name))
     assert.ok(triggers.includes('guard_task_session_terminal'), 'v4 触发器应在老库上升级出来')
-    assert.equal(Number(reopened.db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v), 4)
+    assert.equal(Number(reopened.db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v), schema.SCHEMA_VERSION)
     // 幂等：再开一次不报错、不重复记录版本
     reopened.close()
     const again = new ProjectDb(file, { root })
     try {
       assert.equal(Number(again.db.prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 4').get().n), 1)
+      assert.equal(Number(again.db.prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 5').get().n), 1)
     } finally { again.close() }
   } finally {
     try { reopened.close() } catch (error) { /* 已关闭 */ }
@@ -853,7 +858,9 @@ test('W1: auditStatuses 报告越界状态且不抛错', function () {
 
 test('W1: 状态枚举覆盖代码实际写入的每一个值', function () {
   // 防止枚举写窄了把正常写入拒掉：这里断言各实体的枚举与代码里实际使用的取值一致。
-  assert.deepEqual(STATUS_ENUMS.slices.slice(0, 6), ['open', 'in_progress', 'review', 'blocked', 'done', 'archived'])
+  // v5 在 done 与 archived 之间插入 verified：交付方自认完成（done）≠ 独立验收通过（verified）。
+  assert.deepEqual(STATUS_ENUMS.slices.slice(0, 6), ['open', 'in_progress', 'review', 'blocked', 'done', 'verified'])
+  assert.ok(STATUS_ENUMS.slices.includes('archived'), 'slices 必须允许 archived（在 verified 之后）')
   assert.ok(STATUS_ENUMS.tasks.includes('in_progress'), 'tasks 必须允许 in_progress（orchestration 派活时写入）')
   assert.ok(STATUS_ENUMS.tasks.includes('review'), 'tasks 必须允许 review（replay 预演用到）')
   assert.ok(STATUS_ENUMS.slices.includes('review'), 'slices 必须允许 review（收工写入）')

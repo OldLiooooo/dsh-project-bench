@@ -10,7 +10,9 @@ export { timeline, timelineMarkdown }
 
 export const SESSION_ROLES = ['产品', 'UX', '架构', '码农', '测试', '发布', '复盘']
 export const PM_SESSION_NAME = '项目办公室'
-export const SESSION_KINDS = ['pm', 'task', 'subagent']
+// qa（v5）：独立验收会话。它不算 task —— 不算 task 就不会去抢租约写作用域，
+// 也不会被「同切片同角色只能一个 active」挡在验收这一步之外。
+export const SESSION_KINDS = ['pm', 'task', 'qa', 'subagent']
 export const SLICE_TYPES = ['workitem', 'module']
 export const SESSION_END_STATUSES = ['done', 'failed', 'interrupted', 'ended']
 
@@ -58,6 +60,10 @@ export function mapSlice(row) {
     ownerSession: row.owner_session ?? undefined,
     currentHandoff: row.current_handoff ?? undefined,
     acceptance: parseJson(row.acceptance_json, {}),
+    /** v5：谁是验收者、什么时候、从哪个会话（只有 status='verified' 时有值）。 */
+    verifiedBy: row.verified_by ?? undefined,
+    verifiedAt: row.verified_at ?? undefined,
+    verifiedSession: row.verified_session ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -123,6 +129,8 @@ export function mapDecision(row) {
     status: row.status,
     irreversible: Boolean(row.irreversible),
     deadline: row.deadline ?? undefined,
+    /** 超时后默认采用的选项 value（只有非不可逆决策才有意义，见设计 §6.3）。 */
+    defaultOption: row.default_option ?? undefined,
     decidedBy: row.decided_by ?? undefined,
     rationale: row.rationale ?? undefined,
     stage: row.stage ?? undefined,
@@ -147,6 +155,7 @@ export function mapEvidence(row) {
     resultSummary: row.result_summary,
     createdBy: row.created_by ?? undefined,
     verifiedBy: row.verified_by ?? undefined,
+    verifiedAt: row.verified_at ?? undefined,
     createdAt: row.created_at,
   }
 }
@@ -221,7 +230,15 @@ export function createSlice(db, input = {}) {
 export function updateSliceStatus(db, input = {}) {
   const id = requiredText(input.id || input.sliceId, 'id')
   const patch = {}
-  if (input.status !== undefined) patch.status = requiredText(input.status, 'status')
+  if (input.status !== undefined) {
+    const next = requiredText(input.status, 'status')
+    // 验收是一条独立写路径（verifySlice：要签名人、要独立于实现者）。这里挡住，
+    // 否则任何一次普通状态更新都能把切片写成 verified —— 那 verified 就只是个改名。
+    if (next === 'verified') {
+      throw fail('INVALID', '把切片置为 verified 必须走 verifySlice（需要验收人签名，并校验验收者不是实现者）；普通状态更新不能直写 verified。')
+    }
+    patch.status = next
+  }
   if (input.ownerRole !== undefined) patch.owner_role = optionalText(input.ownerRole)
   if (input.ownerSession !== undefined) patch.owner_session = optionalText(input.ownerSession)
   if (input.currentHandoff !== undefined) patch.current_handoff = optionalText(input.currentHandoff)
@@ -252,6 +269,83 @@ export function updateSliceStatus(db, input = {}) {
       },
     })
     return getSlice(db, id)
+  })
+}
+
+/**
+ * 验收切片（v5 Verified Done）：把 review/done → verified，并记录签名人与验收时间。
+ *
+ * 为什么必须是独立函数而不是 updateSliceStatus 的一个分支：
+ *   1. 要写 verified_by / verified_at / verified_session 三列（DB 触发器也要求 verified_by 非空）；
+ *   2. 要校验「建造者不验收」—— 用 sessions 表反查该切片最近一次实现会话；
+ *   3. 要落 slice/verify 事件（与 slice/status 区分，进度统计按前者算）。
+ *
+ * 允许从哪些状态验收：review（正常路径）、done（交付方自认完成但没验）。
+ * 不允许：verified（已是终态，触发器也会拦）、open/in_progress（还没交付就验收 = 走过场）。
+ * @returns {{slice:object, selfVerified:boolean}}
+ */
+export function verifySlice(db, input = {}) {
+  const id = requiredText(input.id || input.sliceId, 'id')
+  const verifier = requiredText(input.verifiedBy, 'verifiedBy')
+  const verifierSession = optionalText(input.verifierSession)
+  const resultSummary = optionalText(input.resultSummary)
+  return db.tx(() => {
+    const before = getSlice(db, id)
+    if (!before) throw fail('NOT_FOUND', 'slice not found: ' + id)
+    if (before.status === 'verified') {
+      throw fail('INVALID', '切片已经是 verified（验收是终态，不能重复验收）：' + id + '（验收人 ' + (before.verifiedBy || '?') + '）')
+    }
+    if (before.status !== 'review' && before.status !== 'done') {
+      throw fail('INVALID', '只有 review/done 状态的切片能验收，当前是 ' + before.status + '：' + before.key)
+    }
+    // 建造者不验收：该切片最近一次 task 会话若就是验收者，拒绝。
+    // 注意判据是「同一切片最近一次实现会话」，不按角色词判断 —— 角色词是文案，会话 id 是事实。
+    const lastImpl = db.db.prepare(
+      "SELECT id, dsh_session_id, name, role FROM sessions WHERE project_id = ? AND slice_id = ? AND kind = 'task' ORDER BY started_at DESC LIMIT 1"
+    ).get(requireProjectId(db), id)
+    const selfVerified = Boolean(lastImpl && verifierSession && lastImpl.dsh_session_id === verifierSession)
+    if (selfVerified) {
+      throw fail('SELF_VERIFICATION_DENIED', '建造者不验收：验收者与会话 ' + lastImpl.name + '（' + lastImpl.dsh_session_id + '）是同一个人。请换独立的验收会话/人。', {
+        sliceId: id,
+        implementerSession: lastImpl.dsh_session_id,
+        implementerName: lastImpl.name,
+        verifierSession: verifierSession,
+      })
+    }
+    const at = nowIso()
+    db.db.prepare('UPDATE slices SET status = ?, verified_by = ?, verified_at = ?, verified_session = ?, updated_at = ? WHERE id = ? AND project_id = ?')
+      .run('verified', verifier, at, verifierSession ?? null, at, id, requireProjectId(db))
+    db.appendEvent({
+      kind: 'slice/verify',
+      sliceId: id,
+      subjectType: 'slice',
+      subjectId: id,
+      actorSession: verifierSession ?? undefined,
+      role: input.role,
+      payload: {
+        from: before.status,
+        to: 'verified',
+        verifiedBy: verifier,
+        implementerSession: lastImpl ? lastImpl.dsh_session_id : undefined,
+        implementerName: lastImpl ? lastImpl.name : undefined,
+        resultSummary: resultSummary,
+      },
+    })
+    // 顺带把该切片尚未签名的证据回填验收人（B5：verified_by 此前只读不写）。
+    try {
+      db.db.prepare("UPDATE evidence SET verified_by = ?, verified_at = ? WHERE project_id = ? AND slice_id = ? AND (verified_by IS NULL OR TRIM(verified_by) = '')")
+        .run(verifier, at, requireProjectId(db), id)
+    } catch (error) { /* 证据回填失败不阻断验收（证据可能为空） */ }
+    // B7：links 表此前建了但从未写入。验收是第一个真正需要「图关系」的点：
+    // 「这次验收依据了哪些证据」必须能反查，否则审计只能靠 payload 里的自由字段。
+    try {
+      const evidenceRows = db.db.prepare('SELECT id FROM evidence WHERE project_id = ? AND slice_id = ?').all(requireProjectId(db), id)
+      const insertLink = db.db.prepare('INSERT OR IGNORE INTO links(src_type, src_id, dst_type, dst_id, rel, created_at) VALUES (?,?,?,?,?,?)')
+      for (const evidence of evidenceRows) {
+        insertLink.run('evidence', evidence.id, 'slice', id, 'verifies', at)
+      }
+    } catch (error) { /* 连边失败不阻断验收：图关系是派生视图，不是事实本体 */ }
+    return { slice: getSlice(db, id), selfVerified: false }
   })
 }
 
@@ -404,6 +498,11 @@ export function createSession(db, input = {}) {
     let sliceKey
     if (sliceId) sliceKey = requireSlice(db, sliceId).key
     role = validateTaskSessionName(name, role, sliceKey)
+  } else if (kind === 'qa') {
+    // 验收会话名固定前缀「验收-切片key-动作」，与任务会话的「角色-切片-动作」区分开，
+    // 避免在时间线里把验收会话误读成实现会话。
+    if (!name) throw fail('INVALID', '验收会话名称不能为空（应为 验收-切片key-动作）')
+    if (!name.startsWith('验收-')) throw fail('INVALID', '验收会话名必须以「验收-」开头：' + name)
   } else if (!name) {
     throw fail('INVALID', '会话名称不能为空')
   }
@@ -582,9 +681,9 @@ export function createDecision(db, input = {}) {
   return db.tx(() => {
     const id = newId('decision')
     const at = nowIso()
-    db.db.prepare('INSERT INTO decisions(id, project_id, slice_id, kind, title, question, options_json, recommended, consequences, status, irreversible, deadline, stage, gate, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    db.db.prepare('INSERT INTO decisions(id, project_id, slice_id, kind, title, question, options_json, recommended, consequences, status, irreversible, deadline, default_option, stage, gate, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(id, projectId, sliceId, kind, title, question, jsonText(options), input.recommended ?? null, input.consequences ?? null,
-        'pending', irreversible ? 1 : 0, input.deadline ?? null, input.stage ?? null, input.gate ?? null, input.createdBy ?? null, at)
+        'pending', irreversible ? 1 : 0, input.deadline ?? null, input.defaultOption ?? null, input.stage ?? null, input.gate ?? null, input.createdBy ?? null, at)
     db.appendEvent({
       kind: 'decision/create',
       sliceId: sliceId || undefined,

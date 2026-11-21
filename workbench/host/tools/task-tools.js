@@ -4,6 +4,15 @@ import { fail } from '../db.js'
 import { nowIso } from '../util.js'
 import { notifyPm, invalidateActorCache } from '../orchestration.js'
 import { validateFinish, scopePolicyOf } from '../scope.js'
+import { checkDeliverableType } from '../project-defaults.js'
+
+/** project.json（缺失/读取失败时返回 undefined —— 由 checkDeliverableType 当作「不约束」）。 */
+function projectJsonOf(deps, actor) {
+  try {
+    if (deps.registry && typeof deps.registry.projectJson === 'function' && actor.root) return deps.registry.projectJson(actor.root)
+  } catch (error) { /* 读不到就不约束，但事件里会体现 */ }
+  return undefined
+}
 import {
   params, S, B, STRING_ARRAY, requireProjectActor, requireText, optionalText,
   requireSliceId, notifyWrite, currentStageOf, normalizeProjectPath,
@@ -87,6 +96,16 @@ export const docWrite = {
       const sliceId = requireSliceId(actor, optionalText(args.sliceId))
       const slice = deps.store.getSlice(db, sliceId)
       if (!slice) throw fail('NOT_FOUND', '切片不存在：' + sliceId)
+      // B3：阶段可交付类型（deliverableTypes）此前只写不读，这里让它真的生效。
+      // 只拦「新建文档」：给已有文档追加新版本时类型已经定了，再拦只会把正常返工卡死。
+      const stageRow = currentStageOf(deps, db)
+      const stageKey = stageRow ? stageRow.key : undefined
+      const policyCheck = checkDeliverableType(projectJsonOf(deps, actor), stageKey, type)
+      if (!policyCheck.allowed) {
+        throw fail('STAGE_DELIVERABLE_NOT_ALLOWED', policyCheck.reason, {
+          stage: policyCheck.stageKey, allowedTypes: policyCheck.allowedTypes, requestedType: type,
+        })
+      }
       const logicalKey = optionalText(args.logicalKey) || (type + '/' + slice.key)
       doc = deps.docs.findDocumentByLogicalKey(db, logicalKey)
       if (!doc) {
@@ -137,10 +156,12 @@ export const evidenceAdd = {
     sliceId: S('切片 id（可选，默认本切片）'),
     taskId: S('任务 id（可选，默认本任务）'),
   }, ['kind', 'resultSummary']),
-  actors: ['task'],
+  // qa：验收会话也要能记证据（验收结论本身就是证据）。但它没有租约，所以下面按 actor 区分校验。
+  actors: ['task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     const sliceId = requireSliceId(actor, optionalText(args.sliceId))
-    deps.leases.assertWriteScope(actor.db, { sliceId: sliceId, sessionId: actor.session.id })
+    // 验收会话不占租约（它不写工作区），跳过写作用域校验；任务会话必须过租约。
+    if (actor.kind === 'task') deps.leases.assertWriteScope(actor.db, { sliceId: sliceId, sessionId: actor.session.id })
     const contextTaskId = actor.session && actor.session.context ? actor.session.context.taskId : undefined
     const evidence = deps.store.addEvidence(actor.db, {
       sliceId: sliceId,
