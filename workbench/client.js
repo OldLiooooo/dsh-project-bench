@@ -5,6 +5,9 @@
 //   sidebar.panellist          id  = 'project-workbench'        -> WorkbenchIcon
 //   conversation.session.header.utilities  id = 'wb-pm-badge'   -> PMSessionBadge (PM session only)
 //   conversation.composer.dock             id = 'wb-pm-summary' -> PMComposerSummary (PM session only)
+//   sidebar.session.row.leading            id = 'wb-role-chip'  -> SessionRoleChip (role initial)
+//   sidebar.session.row.hover              id = 'wb-project-hover' -> SessionProjectHover
+//   sidebar.footer.action                  id = 'wb-project-status' -> SidebarProjectStatus
 //
 // Data channel (contracts §5/§10): fetch('/project-workbench/api/*', {credentials:'same-origin'})
 //   GET  /projects                -> project switcher
@@ -284,6 +287,33 @@ window.__ModuleLoader__.load({
 .wb-dock-summary:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
 .wb-dock-summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 .wb-dock-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-role-chip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:var(--dsw-radius-xs);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxxs-strong-11);line-height:1;flex:none}
+.wb-role-chip[data-tone=pm]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}
+.wb-hover-project{display:flex;flex-direction:column;gap:2px;margin:2px 0}
+.wb-hover-project-row{display:flex;gap:6px;align-items:baseline;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary);min-width:0}
+.wb-hover-project-key{flex:none;color:var(--dsw-alias-label-tertiary)}
+.wb-hover-project-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-hover-project[data-tone=warn] .wb-hover-project-value{color:var(--dsw-alias-state-warn-label)}
+.wb-sidebar-status{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxs-12);cursor:pointer;text-align:left}
+.wb-sidebar-status:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.wb-sidebar-status:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.wb-sidebar-status-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-option-pick{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid var(--dsw-alias-border-l2);border-radius:50%;background:transparent;color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xs-13);cursor:pointer;flex:none}
+.wb-option[data-chosen=true] .wb-option-pick{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-bg-base)}
+.wb-option-label{padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.wb-option-label:hover{text-decoration:underline}
+.wb-decision-target{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;margin:6px 0 2px;padding:6px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-secondary)}
+.wb-decision-target-label{flex:none;color:var(--dsw-alias-label-tertiary)}
+.wb-decision-target-value{color:var(--dsw-alias-label-primary)}
+.wb-slice-mark{display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);flex:none}
+.wb-row-btn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}
+.wb-row-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.wb-row-btn:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-1px}
+.wb-menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);text-align:left;cursor:pointer}
+.wb-menu-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.wb-menu-item:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-1px}
+.wb-panel-glyph{position:relative;display:inline-flex;align-items:center;justify-content:center}
+.wb-glyph-badge{position:absolute;top:-1px;right:-2px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-warn-primary,var(--dsw-alias-state-business-primary));box-shadow:0 0 0 1.5px var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base))}
 @media (width<=1100px){.wb-tree-pane{flex-basis:280px}.wb-doc-layout{flex-direction:column}.wb-doc-list{flex:1 1 auto;max-width:none;width:100%}.wb-doc-preview{width:100%}}
 `
     function ensureStyle() {
@@ -471,6 +501,12 @@ window.__ModuleLoader__.load({
       'decisions.submitting': '提交中…',
       'decisions.question': '问题',
       'decisions.options': '选项',
+      'decisions.youAreApproving': '这次批准的是：',
+      'decisions.chooseFirst': '请先在上方选择一个选项',
+      'decisions.approveChoice': '批准 {choice}',
+      'decisions.approveHint': '批准「{choice}」并写入项目记录',
+      'decisions.answeredAs': '选定：{choice}',
+      'decisions.noAnswerRecorded': '（历史决策未记录选的是哪一项）',
       'decisions.recommended': '推荐',
       'decisions.consequences': '不返工的后果',
       'decisions.irreversible': '不可逆',
@@ -481,6 +517,10 @@ window.__ModuleLoader__.load({
       'decisions.statusRejected': '已驳回',
       'decisions.pendingBadge': '待拍板',
       'decisions.success': '决策已提交，时间线与门禁已更新。',
+      'decisions.successExportPartial': '已批准，但有 {failed} 个文件导出失败。阶段已推进，文件可重新生成。',
+      'decisions.exportReplayDone': '导出已补偿：文件全部落盘。',
+      'decisions.exportReplayPartial': '已补偿，仍有 {remaining} 个文件失败。',
+      'decisions.exportReplay': '重新生成导出',
       'decisions.error': '决策提交失败',
       'decisions.confirmRequired': '不可逆操作需要二次确认（confirmed=true）。',
       'decisions.slice': '切片',
@@ -514,6 +554,23 @@ window.__ModuleLoader__.load({
       'badge.back': '回到项目',
       'badge.noSlice': '无当前切片',
       'badge.loading': '项目加载中',
+      'sidebar.roleChip': '角色：{role}',
+      'sidebar.sliceMark': '切片：{slice}',
+      'sidebar.locate': '在项目中定位此切片',
+      'sidebar.locateSlice': '在项目中定位切片：{slice}',
+      'sidebar.copySlice': '复制切片名',
+      'sidebar.openProject': '打开项目工作台',
+      'sidebar.moreRow': '{name}：打开项目工作台',
+      'sidebar.moreRowPending': '{name}：打开项目工作台（待决策 {count}）',
+      'sidebar.pendingBadge': '待决策 {count} 项',
+      'sidebar.menuAria': '项目操作',
+      'sidebar.project': '项目',
+      'sidebar.stage': '阶段',
+      'sidebar.slice': '切片',
+      'sidebar.decisions': '待决策',
+      'sidebar.status': '{name} · {stage} · 待决策 {count}',
+      'sidebar.statusShort': '{name} · 待决策 {count}',
+      'sidebar.statusAria': '项目状态：{text}',
       'status.active': '进行中',
       'status.pending': '待处理',
       'status.open': '进行中',
@@ -770,6 +827,16 @@ window.__ModuleLoader__.load({
       'decisions.submitting': 'Submitting…',
       'decisions.question': 'Question',
       'decisions.options': 'Options',
+      'decisions.youAreApproving': 'You are approving:',
+      'decisions.chooseFirst': 'Pick an option above first',
+      'decisions.approveChoice': 'Approve {choice}',
+      'decisions.approveHint': 'Approve "{choice}" and record it in the project',
+      'decisions.answeredAs': 'Chosen: {choice}',
+      'decisions.noAnswerRecorded': '(legacy decision: the chosen option was not recorded)',
+      'decisions.successExportPartial': 'Approved — but {failed} file(s) failed to export. The stage advanced; you can regenerate the files.',
+      'decisions.exportReplayDone': 'Export replayed: all files are now on disk.',
+      'decisions.exportReplayPartial': 'Export replayed, {remaining} file(s) still failing.',
+      'decisions.exportReplay': 'Regenerate exports',
       'decisions.recommended': 'Recommended',
       'decisions.consequences': 'Cost of not reworking',
       'decisions.irreversible': 'Irreversible',
@@ -813,6 +880,23 @@ window.__ModuleLoader__.load({
       'badge.back': 'Back to project',
       'badge.noSlice': 'No current slice',
       'badge.loading': 'Loading project',
+      'sidebar.roleChip': 'Role: {role}',
+      'sidebar.sliceMark': 'Slice: {slice}',
+      'sidebar.locate': 'Locate this slice in the project',
+      'sidebar.locateSlice': 'Locate slice: {slice}',
+      'sidebar.copySlice': 'Copy slice name',
+      'sidebar.openProject': 'Open project workbench',
+      'sidebar.moreRow': '{name}: open project workbench',
+      'sidebar.moreRowPending': '{name}: open project workbench ({count} pending)',
+      'sidebar.pendingBadge': '{count} pending decisions',
+      'sidebar.menuAria': 'Project actions',
+      'sidebar.project': 'Project',
+      'sidebar.stage': 'Stage',
+      'sidebar.slice': 'Slice',
+      'sidebar.decisions': 'Pending decisions',
+      'sidebar.status': '{name} · {stage} · pending {count}',
+      'sidebar.statusShort': '{name} · pending {count}',
+      'sidebar.statusAria': 'Project status: {text}',
       'status.active': 'Active',
       'status.pending': 'Pending',
       'status.open': 'Open',
@@ -1082,6 +1166,18 @@ window.__ModuleLoader__.load({
     }
 
     /** Stable stage label: "S1 产品" when both parts exist. */
+    /**
+     * Human label for a `stage` value that may arrive in either wire shape:
+     * the `/projects` list sends a stage RECORD (`{id,key,name,status}` or null),
+     * snapshots send the project's stage POINTER (a string like "S1"). Never
+     * `String()` a record — that renders "[object Object]".
+     */
+    function stageText(stage) {
+      if (stage === undefined || stage === null || stage === '') return ''
+      if (typeof stage === 'object') return stageLabel(stage)
+      return String(stage)
+    }
+
     function stageLabel(stage) {
       if (!stage) return ''
       const key = stage.key || stage.id || ''
@@ -1446,7 +1542,28 @@ window.__ModuleLoader__.load({
     function isRecommendedOption(option, recommended) {
       if (!option || recommended === undefined || recommended === null || recommended === '') return false
       const value = typeof recommended === 'object' ? JSON.stringify(recommended) : String(recommended)
-      return option.value === value || option.label === value
+      if (option.value === value || option.label === value) return true
+      // recommended 在真实数据里是一整句（「扩展本项范围（理由：…）」），而选项 label 可能是
+      // 它的前缀、也可能更长（「扩展本项范围，授权同时更新 docs/memory…」）。
+      // 所以：两边都去掉括注，再看其中一方是否是另一方的前缀（双向）。
+      const bare = (text) => String(text || '').split(/[（(]/)[0].trim()
+      const label = bare(option.label)
+      const rec = bare(value)
+      if (label === '' || rec === '') return false
+      const [shorter, longer] = label.length <= rec.length ? [label, rec] : [rec, label]
+      // 太短的前缀（如「A」「修」）容易误配，要求至少 4 个字符。
+      return shorter.length >= 4 && longer.startsWith(shorter)
+    }
+
+    /**
+     * Which option should be pre-selected when the card opens: the recommendation if it
+     * resolves to a real option, otherwise nothing. Never guesses — `undefined` means
+     * "the human must choose", which is what makes "批准" unambiguous.
+     */
+    function defaultAnswerOf(decision, options) {
+      if (!Array.isArray(options) || options.length === 0) return undefined
+      const hit = options.find((option) => isRecommendedOption(option, decision && decision.recommended))
+      return hit ? hit.value : undefined
     }
 
     /** Sessions order: PM first, then active, then newest first. */
@@ -1460,6 +1577,172 @@ window.__ModuleLoader__.load({
       })
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Sidebar seats (方案 ①): the project dimension rides on the host's session rows.
+    // These transforms are pure so the seat components stay render-only and node tests can
+    // exercise them without React, a DOM, or a live hub.
+    // ---------------------------------------------------------------------------------------------
+
+    /** Stable empty index (a fresh Map per render would defeat the seat's memo reads). */
+    const EMPTY_INDEX = new Map()
+
+    /** Fallback hub so a seat stays renderable when a host passes no services (tests, previews). */
+    const EMPTY_HUB_STATE = {
+      version: 0,
+      projects: { phase: 'idle', items: [], error: null },
+      selectedRoot: null,
+      snapshots: {},
+      roots: {},
+      focusRequest: null,
+      sessionIndex: EMPTY_INDEX,
+    }
+    const EMPTY_HUB = {
+      subscribe: () => () => {},
+      getState: () => EMPTY_HUB_STATE,
+      ensureProjects: () => undefined,
+      ensureSnapshot: () => undefined,
+      acquire: () => () => {},
+      selectProject: () => undefined,
+      refreshProjects: () => undefined,
+      refreshSnapshot: () => undefined,
+      requestFocus: () => 0,
+      consumeFocus: () => undefined,
+      dispose: () => undefined,
+    }
+
+    /** Add keys to an expanded-set (never mutates the input). */
+    function withKeys(set, keys) {
+      const next = new Set(set)
+      for (const key of keys) if (typeof key === 'string' && key !== '') next.add(key)
+      return next
+    }
+
+    /**
+     * Locate one slice in the snapshot tree and build the left-tree row that selects it.
+     * The row is the same shape flattenTree emits, so the panel can select it directly.
+     */
+    function sliceSelection(tree, sliceId) {
+      if (!sliceId) return undefined
+      const stages = Array.isArray(tree) ? tree : []
+      for (const branch of stages) {
+        const stage = branch && branch.stage
+        if (!stage) continue
+        const slices = Array.isArray(branch.slices) ? branch.slices : []
+        for (const entry of slices) {
+          const slice = entry && entry.slice
+          if (!slice || slice.id !== sliceId) continue
+          const stageId = stage.id || stage.key
+          return {
+            stageKey: stageId ? 'stage:' + String(stageId) : undefined,
+            sliceKey: 'slice:' + String(slice.id),
+            row: {
+              key: 'slice:' + String(slice.id), kind: 'slice', depth: 1, stage, slice, node: slice,
+              expandable: true, expanded: false,
+              counts: entry.counts && typeof entry.counts === 'object' ? entry.counts : {},
+            },
+          }
+        }
+      }
+      return undefined
+    }
+
+    /** Where a sidebar row's "locate" action should take the panel: its project + slice. */
+    function focusTargetOf(entry) {
+      if (!entry) return undefined
+      if (!entry.sliceId) return undefined
+      return { root: entry.root || null, sliceId: entry.sliceId }
+    }
+
+    /** Role vocabulary -> one glyph (host ROLE_WORDS; PM/subagent are row kinds, not roles). */
+    const ROLE_INITIALS = { 产品: '产', UX: 'U', 架构: '架', 码农: '码', 测试: '测', 发布: '发', 复盘: '复' }
+
+    /** One-glyph label for a Session row chip: role first, then the row kind. */
+    function roleInitial(role, kind) {
+      const text = typeof role === 'string' ? role.trim() : ''
+      if (text !== '') {
+        const mapped = ROLE_INITIALS[text]
+        if (mapped !== undefined) return mapped
+        const first = Array.from(text)[0]
+        if (first === undefined) return ''
+        return /[A-Za-z]/.test(first) ? first.toUpperCase() : first
+      }
+      if (kind === PM_ROLE) return 'P'
+      if (kind === 'subagent') return '子'
+      return ''
+    }
+
+    /** Chip tone: PM keeps the business accent; task roles stay neutral. */
+    function roleTone(kind) {
+      return kind === PM_ROLE ? 'pm' : 'neutral'
+    }
+
+    /** Roots worth indexing: registered, present on disk, initialized project runtimes. */
+    function indexableRoots(projects) {
+      const list = Array.isArray(projects) ? projects : []
+      const roots = []
+      for (const project of list) {
+        if (!project || typeof project.root !== 'string' || project.root === '') continue
+        if (project.exists === false || project.initialized === false) continue
+        if (roots.indexOf(project.root) >= 0) continue
+        roots.push(project.root)
+      }
+      return roots
+    }
+
+    /** The normalized snapshot of one project from hub state, or null while it loads. */
+    function snapshotOf(state, project) {
+      const root = project && project.root
+      if (!root || !state || typeof state.snapshots !== 'object' || state.snapshots === null) return null
+      const entry = state.snapshots[root]
+      return entry && entry.data ? normalizeSnapshot(entry.data) : null
+    }
+
+    /** Pending decision count of one project: snapshot first, the projects list as a fallback. */
+    function pendingDecisionsOf(state, project) {
+      const snapshot = snapshotOf(state, project)
+      if (snapshot) return snapshot.pendingDecisions.length
+      const declared = Number(project && project.pendingDecisions)
+      return Number.isFinite(declared) ? declared : 0
+    }
+
+    /**
+     * dshSessionId -> project context, folded from the registered projects and their snapshots.
+     * Read-only: the sidebar seats decorate a host Session row, they never own the list.
+     */
+    function buildSessionIndex(projects, snapshots) {
+      const index = new Map()
+      const list = Array.isArray(projects) ? projects : []
+      const data = snapshots && typeof snapshots === 'object' ? snapshots : {}
+      for (const root of indexableRoots(list)) {
+        const project = list.find((item) => item && item.root === root)
+        const entry = data[root]
+        const snapshot = entry && entry.data ? normalizeSnapshot(entry.data) : null
+        if (!snapshot) continue
+        const stage = currentStage(snapshot.stages, snapshot.project && snapshot.project.stage)
+        const titles = sliceTitleMap(snapshot.tree)
+        const pending = snapshot.pendingDecisions.length
+        const name = projectDisplayName(project) || projectDisplayName(snapshot.project)
+        for (const row of snapshot.sessions) {
+          if (!row || typeof row !== 'object') continue
+          const sessionId = typeof row.dshSessionId === 'string' ? row.dshSessionId : ''
+          if (sessionId === '') continue
+          index.set(sessionId, {
+            root,
+            projectName: name,
+            stage: stageLabel(stage) || stageText(snapshot.project && snapshot.project.stage),
+            stageKey: (stage && (stage.key || stage.id)) || null,
+            sliceId: typeof row.sliceId === 'string' ? row.sliceId : '',
+            sliceTitle: row.sliceTitle || titles.get(row.sliceId) || '',
+            role: typeof row.role === 'string' ? row.role : '',
+            kind: typeof row.kind === 'string' ? row.kind : '',
+            status: row.status,
+            pendingDecisions: pending,
+          })
+        }
+      }
+      return index
+    }
+
     /** Stage dropdown options for timeline filtering. */
     function timelineStageOptions(stages) {
       const list = Array.isArray(stages) ? stages : []
@@ -1468,13 +1751,23 @@ window.__ModuleLoader__.load({
         .map((stage) => ({ value: stage.key || stage.id, label: stageLabel(stage) }))
     }
 
-    /** Normalize an unknown error into {code,status,message}. */
+    /**
+     * Normalize an unknown error into {code,status,message,issues,hints,busy}.
+     *
+     * v4：服务端现在会带回 issues（逐条问题）、hints（下一步动作）与 details（结构化原因）。
+     * 面板如果只显示一句 message，人看到的仍然是「门禁失败」这种没有信息量的话，
+     * 所以这里把这三块原样带出去，由 renderers 决定展示多少。
+     */
     function errorInfo(error) {
-      if (!error) return { code: 'UNKNOWN', status: 0, message: '' }
-      const code = (error.code || (error.error && error.error.code) || 'UNKNOWN')
-      const status = Number.isFinite(error.status) ? error.status : 0
-      const message = error.message || (error.error && error.error.message) || ''
-      return { code: String(code), status, message: String(message) }
+      if (!error) return { code: 'UNKNOWN', status: 0, message: '', issues: [], hints: [], details: null }
+      const source = error.error && typeof error.error === 'object' ? error.error : error
+      const code = (source.code || error.code || 'UNKNOWN')
+      const status = Number.isFinite(error.status) ? error.status : (Number.isFinite(source.status) ? source.status : 0)
+      const message = source.message || error.message || ''
+      const issues = Array.isArray(source.issues) ? source.issues : []
+      const hints = Array.isArray(source.hints) ? source.hints : []
+      const details = source.details && typeof source.details === 'object' ? source.details : null
+      return { code: String(code), status, message: String(message), issues, hints, details }
     }
 
     /** Localized error copy; never renders raw keys. */
@@ -1485,7 +1778,34 @@ window.__ModuleLoader__.load({
       if (info.code === 'NETWORK') return t('error.network')
       if (info.status === 404 || info.code === 'NOT_FOUND') return t('error.notFound')
       const base = info.message || t('error.generic')
-      return info.code && info.code !== 'UNKNOWN' && info.code !== 'HTTP' ? base + ' (' + t('error.code', { code: info.code }) + ')' : base
+      const head = info.code && info.code !== 'UNKNOWN' && info.code !== 'HTTP' ? base + ' (' + t('error.code', { code: info.code }) + ')' : base
+      // 建议的下一步也一并显示：门禁类错误如果只说「失败了」，人只能去翻日志。
+      const hint = info.hints.length > 0 && info.hints[0] && info.hints[0].hint ? info.hints[0].hint : ''
+      const issueCount = info.issues.length
+      const suffix = (hint ? ' — ' + hint : '') + (issueCount > 0 ? ' [' + issueCount + ']' : '')
+      return head + suffix
+    }
+
+    /** 错误明细行（面板展开时用）：issues 逐条 + details 关键字段，已做长度上限。 */
+    function errorDetailLines(error) {
+      const info = errorInfo(error)
+      const lines = []
+      for (const issue of info.issues.slice(0, 8)) {
+        if (!issue || typeof issue !== 'object') continue
+        const code = issue.code ? '[' + issue.code + ']' : ''
+        const path = issue.path ? ' ' + issue.path : ''
+        const message = issue.message ? ' — ' + String(issue.message).slice(0, 200) : ''
+        lines.push(code + path + message)
+      }
+      if (info.details) {
+        const keys = ['holder', 'epoch', 'presented', 'gate', 'stage', 'batchId', 'attempt', 'failureCode']
+        for (const key of keys) {
+          if (info.details[key] === undefined || info.details[key] === null) continue
+          const value = typeof info.details[key] === 'object' ? JSON.stringify(info.details[key]) : String(info.details[key])
+          lines.push(key + ': ' + value.slice(0, 160))
+        }
+      }
+      return lines
     }
 
     /** Project choice list for the switcher: initialized projects first, then by title. */
@@ -1620,9 +1940,12 @@ window.__ModuleLoader__.load({
       sliceTitleMap, sessionTitleMap, flattenTree, defaultExpandedKeys, projectCounts,
       activeSlices, currentSliceOf, latestEvent, mergeEvents, timelineRoleOptions, filterTimeline,
       eventDetail, eventActor, formatTime, formatFullTime, truncate, decisionOptions,
-      isRecommendedOption, sortSessions, timelineStageOptions, errorInfo, errorText,
+      isRecommendedOption, sortSessions, timelineStageOptions, errorInfo, errorText, errorDetailLines,
       projectChoices, pickDefaultProject, parseDocContent, sessionKindKey, findDocumentById,
       stageProgress, statusKey, eventKindKey, docTypeKey, hasCopy,
+      roleInitial, roleTone, indexableRoots, snapshotOf, pendingDecisionsOf, buildSessionIndex, stageText,
+      withKeys, sliceSelection, focusTargetOf,
+      isRecommendedOption, defaultAnswerOf, decisionOptions,
     }
 
 
@@ -1706,6 +2029,7 @@ window.__ModuleLoader__.load({
         })),
         init: (root) => requestJson('/init', { method: 'POST', body: { root } }),
         decision: (payload) => requestJson('/decision', { method: 'POST', body: payload }),
+        replayExports: (payload) => requestJson('/exports/replay', { method: 'POST', body: payload }),
         pm: (root, dshSessionId) => requestJson('/pm', { method: 'POST', body: { root, dshSessionId } }),
       }
     }
@@ -1724,6 +2048,10 @@ window.__ModuleLoader__.load({
         selectedRoot: null,
         snapshots: {},
         roots: {},
+        /** Arm-once request for the panel to reveal one slice (sidebar "locate" buttons). */
+        focusRequest: null,
+        /** Derived read-only view for the sidebar seats (see publish). Never mutated in place. */
+        sessionIndex: new Map(),
       }
       const listeners = new Set()
       const snapshotRequests = new Map()
@@ -1734,7 +2062,14 @@ window.__ModuleLoader__.load({
 
       function publish(patch) {
         if (disposed) return
-        state = Object.assign({}, state, patch, { version: state.version + 1 })
+        const next = Object.assign({}, state, patch, { version: state.version + 1 })
+        // Derived, read-only view for the sidebar seats: dshSessionId -> project context.
+        // Recomputed here (not per render) so every seat shares one Map identity per publish, and
+        // skipped entirely when neither input reference moved (selectProject, root ref counts).
+        next.sessionIndex = next.projects.items === state.projects.items && next.snapshots === state.snapshots
+          ? state.sessionIndex
+          : buildSessionIndex(next.projects.items, next.snapshots)
+        state = next
         for (const listener of Array.from(listeners)) {
           try {
             listener()
@@ -1927,6 +2262,29 @@ window.__ModuleLoader__.load({
         openEventSource(root)
       }
 
+      /**
+       * Ask the panel to reveal one slice of one project. The request is armed once and consumed
+       * by the panel's effect, so a re-render (or a second visit) never replays it.
+       * @param root - project root the slice belongs to.
+       * @param sliceId - slice to select.
+       * @returns how many focus requests this hub has ever issued.
+       */
+      function requestFocus(root, sliceId) {
+        if (disposed || !root || !sliceId) return state.focusRequest ? state.focusRequest.id : 0
+        const id = (state.focusRequest ? state.focusRequest.id : 0) + 1
+        publish({ focusRequest: { id, root, sliceId } })
+        selectProject(root)
+        return id
+      }
+
+      /** Take the pending focus request (at most once per request id). */
+      function consumeFocus(id) {
+        const request = state.focusRequest
+        if (!request || request.id !== id) return undefined
+        publish({ focusRequest: null })
+        return { root: request.root, sliceId: request.sliceId }
+      }
+
       function selectProject(root) {
         if (disposed) return
         publish({ selectedRoot: root === undefined ? null : root })
@@ -1960,6 +2318,8 @@ window.__ModuleLoader__.load({
         refreshSnapshot: (root, force) => ensureSnapshot(root, force !== false),
         refreshProjects: (force) => ensureProjects(force !== false),
         selectProject,
+        requestFocus,
+        consumeFocus,
         acquire,
         reconnect,
         dispose,
@@ -2040,6 +2400,21 @@ window.__ModuleLoader__.load({
           console.warn('project-workbench: selectPanel failed', error)
         }
       }
+      /**
+       * Open the panel and ask it to reveal one slice. The hub carries the request; the panel
+       * consumes it once, so this is safe to call from any sidebar seat.
+       * @param hub - the plugin hub that owns the request slot.
+       * @param root - project root the slice belongs to.
+       * @param sliceId - slice to reveal.
+       */
+      function openSlice(hub, root, sliceId) {
+        if (!hub || !root || !sliceId) {
+          openPanel()
+          return
+        }
+        openPanel()
+        hub.requestFocus(root, sliceId)
+      }
       function uiLang() {
         if (typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) {
           return String(document.documentElement.lang)
@@ -2110,7 +2485,7 @@ window.__ModuleLoader__.load({
       return {
         getSessions, getWorkspaces,
         sessionSummary, subscribeSessions, workspaceIdForSession, currentSessionCwd, sessionExists,
-        openSession, openPanel, uiLang, notify, createPMSession,
+        openSession, openPanel, openSlice, uiLang, notify, createPMSession,
       }
     }
 
@@ -2311,6 +2686,41 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function SliceIcon(props) {
+      const size = props.size || 12
+      return h('svg', { viewBox: '0 0 16 16', width: size, height: size, 'aria-hidden': 'true', focusable: 'false' },
+        h('path', { d: 'M2.5 4.5h11M2.5 8h11M2.5 11.5h7', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' }),
+      )
+    }
+
+    function LocateIcon(props) {
+      const size = props.size || 14
+      return h('svg', { viewBox: '0 0 16 16', width: size, height: size, 'aria-hidden': 'true', focusable: 'false' },
+        h('circle', { cx: 8, cy: 8, r: 4.6, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
+        h('path', { d: 'M8 1.4v2.4M8 12.2v2.4M1.4 8h2.4M12.2 8h2.4', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' }),
+      )
+    }
+
+    function CopyIcon(props) {
+      const size = props.size || 14
+      return h('svg', { viewBox: '0 0 16 16', width: size, height: size, 'aria-hidden': 'true', focusable: 'false' },
+        h('rect', { x: 5.5, y: 5.5, width: 8, height: 8, rx: 1.5, fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 }),
+        h('path', { d: 'M10.5 3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' }),
+      )
+    }
+
+    /** Copy text to the clipboard; failures are silent (the menu just closes). */
+    function copyText(text) {
+      if (typeof text !== 'string' || text === '') return
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          void navigator.clipboard.writeText(text)
+        }
+      } catch (error) {
+        // clipboard unavailable: nothing else to do
+      }
+    }
+
     function RefreshIcon() {
       return h('svg', { viewBox: '0 0 16 16', width: 13, height: 13, 'aria-hidden': 'true' },
         h('path', { d: 'M13 8a5 5 0 1 1-1.6-3.7M13 3v3h-3', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }),
@@ -2386,6 +2796,20 @@ window.__ModuleLoader__.load({
         if (!snapshotData || norm.tree.length === 0) return
         setExpanded((previous) => (previous.size > 0 ? previous : defaultExpandedKeys(norm.tree, norm.stages, norm.project && norm.project.stage)))
       }, [snapshotData, norm])
+
+      // Consume one "locate this slice" request from the sidebar: reveal its stage + slice,
+      // select the slice row and land on the Sessions tab. The request is taken at most once.
+      const focusRequest = state.focusRequest
+      React.useEffect(() => {
+        if (!focusRequest || !snapshotData) return
+        if (root && !samePath(root, focusRequest.root)) return
+        const found = sliceSelection(norm.tree, focusRequest.sliceId)
+        hub.consumeFocus(focusRequest.id)
+        if (!found) return
+        setExpanded((previous) => withKeys(previous, [found.stageKey, found.sliceKey]))
+        setSelected(found.row)
+        setTab('sessions')
+      }, [focusRequest, snapshotData, root, norm.tree, hub])
 
       const loadDoc = React.useCallback(async (docId, version) => {
         if (!root || !docId) return
@@ -3311,7 +3735,14 @@ window.__ModuleLoader__.load({
     /** One pending decision card: question, options, recommendation, consequences, human actions. */
     function DecisionCard(props) {
       const { t, decision, onApprove, onReject, lang, sliceTitle } = props
+      const { hub, runtime } = props
       const options = decisionOptions(decision)
+      // 选中项：先取用户在本卡上的选择，没有就退回「推荐项」，再没有就是"必须自己选"。
+      const [picked, setPicked] = React.useState(undefined)
+      const chosen = picked !== undefined ? picked : defaultAnswerOf(decision, options)
+      const chosenOption = options.find((option) => option.value === chosen)
+      const mustChoose = options.length > 0 && chosenOption === undefined
+      const choiceLabel = chosenOption ? chosenOption.value + ' · ' + chosenOption.label : ''
       return h('article', { className: 'wb-decision', 'data-irreversible': decision.irreversible ? 'true' : 'false' },
         h('div', { className: 'wb-decision-title' },
           h('span', null, decision.title || decision.id),
@@ -3324,28 +3755,63 @@ window.__ModuleLoader__.load({
         ),
         decision.question ? h('p', { className: 'wb-decision-question' }, decision.question) : null,
         options.length > 0
-          ? h('ul', { className: 'wb-options' }, options.map((option) => h('li', {
-              key: option.value,
-              className: 'wb-option',
-              'data-recommended': isRecommendedOption(option, decision.recommended) ? 'true' : 'false',
-            },
-              h('span', { className: 'wb-option-value' }, option.value),
-              h('span', { className: 'wb-option-body' },
-                h('span', null, option.label),
-                option.description ? h('span', { className: 'wb-list-sub' }, option.description) : null,
-              ),
-              isRecommendedOption(option, decision.recommended) ? h(Badge, { tone: 'busy' }, t('decisions.recommended')) : null,
-            )))
+          ? h('ul', { className: 'wb-options', role: 'radiogroup', 'aria-label': t('decisions.options') },
+              options.map((option) => {
+                const isChosen = option.value === chosen
+                return h('li', {
+                  key: option.value,
+                  className: 'wb-option',
+                  'data-recommended': isRecommendedOption(option, decision.recommended) ? 'true' : 'false',
+                  'data-chosen': isChosen ? 'true' : 'false',
+                },
+                  h('button', {
+                    type: 'button',
+                    role: 'radio',
+                    'aria-checked': isChosen ? 'true' : 'false',
+                    className: 'wb-option-pick',
+                    onClick: () => setPicked(option.value),
+                  },
+                    h('span', { className: 'wb-option-value' }, option.value),
+                  ),
+                  h('span', { className: 'wb-option-body' },
+                    h('button', {
+                      type: 'button',
+                      className: 'wb-option-label',
+                      onClick: () => setPicked(option.value),
+                    }, option.label),
+                    option.description ? h('span', { className: 'wb-list-sub' }, option.description) : null,
+                  ),
+                  isRecommendedOption(option, decision.recommended) ? h(Badge, { tone: 'busy' }, t('decisions.recommended')) : null,
+                )
+              }))
           : null,
         decision.recommended && options.length === 0
           ? h('p', { className: 'wb-muted' }, t('decisions.recommended') + ': ' + String(decision.recommended))
+          : null,
+        // 把「这次批准的是什么」写死在按钮上方，避免"批准"指向不清。
+        options.length > 0
+          ? h('p', { className: 'wb-decision-target' },
+              h('span', { className: 'wb-decision-target-label' }, t('decisions.youAreApproving')),
+              chosenOption
+                ? h('strong', { className: 'wb-decision-target-value' }, choiceLabel)
+                : h('span', { className: 'wb-muted' }, t('decisions.chooseFirst')))
           : null,
         decision.consequences
           ? h('p', { className: 'wb-decision-question' }, t('decisions.consequences') + ': ' + String(decision.consequences))
           : null,
         h('div', { className: 'wb-card-actions' },
-          h('button', { type: 'button', className: 'wb-btn', 'data-variant': 'primary', onClick: () => onApprove(decision) }, t('decisions.approve')),
-          h('button', { type: 'button', className: 'wb-btn', 'data-variant': 'danger', onClick: () => onReject(decision) }, t('decisions.reject')),
+          h('button', {
+            type: 'button',
+            className: 'wb-btn',
+            'data-variant': 'primary',
+            // 没选出选项时按钮 disabled：不允许"批准了但不知道批的哪一条"。
+            disabled: mustChoose,
+            title: mustChoose ? t('decisions.chooseFirst') : t('decisions.approveHint', { choice: choiceLabel }),
+            onClick: () => onApprove(decision, chosen),
+          }, mustChoose
+            ? t('decisions.approve')
+            : t('decisions.approveChoice', { choice: chosenOption.value })),
+          h('button', { type: 'button', className: 'wb-btn', 'data-variant': 'danger', onClick: () => onReject(decision, chosen) }, t('decisions.reject')),
           h('span', { className: 'wb-muted' }, formatTime(decision.createdAt, lang)),
         ),
       )
@@ -3360,6 +3826,9 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [failure, setFailure] = React.useState(null)
       const [notice, setNotice] = React.useState(null)
+      // 导出未导全时的补偿入口（阶段已推进，缺的是可再生文件）。
+      const [exportReplay, setExportReplay] = React.useState(null)
+      const [replayBusy, setReplayBusy] = React.useState(false)
       const sliceTitles = (maps && maps.sliceTitles) || new Map()
       const selectedSliceId = selected && selected.slice
         ? selected.slice.id
@@ -3374,8 +3843,8 @@ window.__ModuleLoader__.load({
         .slice()
         .sort((left, right) => String(right.decidedAt || right.createdAt || '').localeCompare(String(left.decidedAt || left.createdAt || '')))
 
-      const startConfirm = (decision, action) => {
-        setConfirm({ decision, action })
+      const startConfirm = (decision, action, answer) => {
+        setConfirm({ decision, action, answer })
         setRationale('')
         setIrreversibleChecked(false)
         setFailure(null)
@@ -3391,15 +3860,26 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setFailure(null)
         try {
-          await actions.submitDecision({
+          const outcome = await actions.submitDecision({
             root,
             id: confirm.decision.id,
             status: confirm.action,
+            // answer 只有在「有选项且选了」时才发；门禁这类无选项决策保持 undefined。
+            answer: confirm.answer,
             rationale: rationale.trim(),
             confirmed: confirm.decision.irreversible ? irreversibleChecked : false,
           })
           setConfirm(null)
-          setNotice(t('decisions.success'))
+          // 导出失败不能显示成「一切成功」：阶段已推进，但文件没导全。
+          // 如实告诉人「可补偿」，并给出可点的重放动作（而不是让人去翻日志）。
+          const exportResult = outcome && outcome.exportResult
+          if (exportResult && exportResult.failed > 0) {
+            setNotice(t('decisions.successExportPartial', { failed: exportResult.failed }))
+            setExportReplay(exportResult.batchId ? { batchId: exportResult.batchId, failed: exportResult.failed } : null)
+          } else {
+            setNotice(t('decisions.success'))
+            setExportReplay(null)
+          }
           if (root) hub.refreshSnapshot(root, true)
         } catch (error) {
           const info = errorInfo(error)
@@ -3409,6 +3889,22 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
+      const runExportReplay = async () => {
+        if (!root || !exportReplay || replayBusy) return
+        setReplayBusy(true)
+        try {
+          const result = await actions.replayExports({ root, batchId: exportReplay.batchId })
+          const remaining = result && typeof result.remaining === 'number' ? result.remaining : 0
+          setNotice(t(remaining > 0 ? 'decisions.exportReplayPartial' : 'decisions.exportReplayDone', { remaining }))
+          if (remaining === 0) setExportReplay(null)
+          hub.refreshSnapshot(root, true)
+        } catch (error) {
+          setFailure(error)
+        } finally {
+          setReplayBusy(false)
+        }
+      }
+
       const actionLabel = confirm
         ? t(confirm.action === 'approved' ? 'decisions.actionApprove' : 'decisions.actionReject')
         : ''
@@ -3421,6 +3917,12 @@ window.__ModuleLoader__.load({
               h('p', { className: 'wb-modal-desc' },
                 (confirm.decision.title || '') + '\n' + (confirm.decision.question || '')),
               h('div', { className: 'wb-modal-body' },
+                confirm.answer
+                  ? h('p', { className: 'wb-decision-target' },
+                      h('span', { className: 'wb-decision-target-label' }, t('decisions.youAreApproving')),
+                      h('strong', { className: 'wb-decision-target-value' },
+                        confirm.answer + ' · ' + (decisionOptions(confirm.decision).find((option) => option.value === confirm.answer) || {}).label))
+                  : null,
                 confirm.decision.irreversible
                   ? h('div', { className: 'wb-warnbox' },
                       h(Dot, { tone: 'warn' }),
@@ -3471,6 +3973,19 @@ window.__ModuleLoader__.load({
           h('span', { className: 'wb-muted' }, t('decisions.pending') + ' ' + String(pending.length)),
         ),
         notice ? h(Notice, { tone: 'ok' }, notice) : null,
+        // 导出未导全：给一个可点的补偿入口，而不是让人去命令行重放。
+        exportReplay
+          ? h('div', { className: 'wb-warnbox' },
+              h(Dot, { tone: 'warn' }),
+              h('span', null, t('decisions.successExportPartial', { failed: exportReplay.failed })),
+              h('button', {
+                type: 'button',
+                className: 'wb-btn wb-btn-ghost',
+                disabled: replayBusy,
+                onClick: runExportReplay,
+              }, t('decisions.exportReplay')),
+            )
+          : null,
         h('p', { className: 'wb-muted' }, t('decisions.emptyHint')),
         h('h4', { className: 'wb-section-title' }, t('decisions.pending') + ' (' + String(pending.length) + ')'),
         pending.length === 0
@@ -3478,8 +3993,8 @@ window.__ModuleLoader__.load({
           : h('div', { className: 'wb-stack' }, pending.map((decision) => h(DecisionCard, {
               key: decision.id, t, decision, lang,
               sliceTitle: decision.sliceTitle || (decision.sliceId ? sliceTitles.get(decision.sliceId) : undefined),
-              onApprove: (item) => startConfirm(item, 'approved'),
-              onReject: (item) => startConfirm(item, 'rejected'),
+              onApprove: (item, answer) => startConfirm(item, 'approved', answer),
+              onReject: (item, answer) => startConfirm(item, 'rejected', answer),
             }))),
         h('hr', { className: 'wb-sep' }),
         h('h4', { className: 'wb-section-title' }, t('decisions.resolved') + ' (' + String(resolved.length) + ')'),
@@ -3587,12 +4102,56 @@ window.__ModuleLoader__.load({
 
     /** Sidebar entry glyph (registered in sidebar.panellist under the panel key). */
     function WorkbenchIcon(props) {
+      const t = pickT(props)
       const size = props && props.size ? props.size : 18
+      const hub = props.hub || EMPTY_HUB
+      const state = useHubState(hub)
+      React.useEffect(() => {
+        if (state.projects.phase === 'idle') hub.ensureProjects()
+      }, [state.projects.phase, hub])
+      const project = pickDefaultProject(state.projects.items, state.selectedRoot, props.runtime ? props.runtime.currentSessionCwd() : undefined)
+      const pending = project ? pendingDecisionsOf(state, project) : 0
       return h('span', {
-        style: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'currentColor' },
-        'aria-hidden': 'true',
-      }, h(ProjectIcon, { size }))
+        className: 'wb-panel-glyph',
+        style: { color: 'currentColor' },
+        title: pending > 0 ? t('sidebar.pendingBadge', { count: pending }) : undefined,
+      },
+        h('span', { 'aria-hidden': 'true', style: { display: 'inline-flex' } }, h(ProjectIcon, { size })),
+        pending > 0 ? h('span', { className: 'wb-glyph-badge', 'aria-hidden': 'true' }) : null,
+      )
     }
+
+    /**
+     * sidebar.panellist.actions never gets a plain list row: its owner props feed a Menu, so the
+     * plugin row renders inside the panel "More" menu. This seat is registered there; the sidebar
+     * shows More only while this list is non-empty.
+     */
+    function PanelMoreMenuItem(props) {
+      const t = pickT(props)
+      const { hub, runtime } = props
+      const state = useHubState(hub || EMPTY_HUB)
+      React.useEffect(() => {
+        if (hub && state.projects.phase === 'idle') hub.ensureProjects()
+      }, [state.projects.phase, hub])
+      const fallback = pickDefaultProject(state.projects.items, state.selectedRoot, runtime ? runtime.currentSessionCwd() : undefined)
+      // 未初始化的项目没有可去的地方：这一行不出现，别让用户点了落空。
+      const project = fallback && fallback.exists !== false && fallback.initialized !== false ? fallback : undefined
+      if (!project) return null
+      const pending = pendingDecisionsOf(state, project)
+      const name = projectDisplayName(project)
+      const label = pending > 0 ? t('sidebar.moreRowPending', { name, count: pending }) : t('sidebar.moreRow', { name })
+      return h('button', {
+        type: 'button',
+        role: 'menuitem',
+        className: 'wb-menu-item',
+        onClick: () => {
+          if (typeof props.onDismiss === 'function') props.onDismiss()
+          runtime.openPanel()
+        },
+      }, h(ProjectIcon, { size: 14 }), h('span', null, label))
+    }
+
+
 
     /** PM session header utilities: stage, current slice, pending decision count, back-to-project. */
     function PMSessionBadge(props) {
@@ -3609,7 +4168,7 @@ window.__ModuleLoader__.load({
       const pending = snapshot.pendingDecisions.length
       return h('span', { className: 'wb-pm-badge', role: 'group', 'aria-label': t('badge.aria') },
         h(Badge, { tone: 'busy', className: 'wb-badge-label' },
-          t('badge.stage', { stage: stageLabel(stage) || String((snapshot.project && snapshot.project.stage) || '—') })),
+          t('badge.stage', { stage: stageLabel(stage) || stageText(snapshot.project && snapshot.project.stage) || '—' })),
         slice
           ? h(Badge, { tone: 'neutral', className: 'wb-pm-slice' },
               t('badge.slice', { slice: slice.title || slice.key || '' }))
@@ -3657,6 +4216,223 @@ window.__ModuleLoader__.load({
       }, h(ProjectIcon, { size: 13 }), h('span', { className: 'wb-dock-text' }, text))
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Sidebar seats (方案 ①). Each seat renders one small decoration for a host Session row and
+    // reads the derived hub.sessionIndex; none of them owns the list, its grouping, or its search.
+    // ---------------------------------------------------------------------------------------------
+
+    /** Subscribe to hub state and make sure the project list is loading; no snapshot side effects. */
+    function useProjectIndex(hub) {
+      const state = useHubState(hub)
+      React.useEffect(() => {
+        if (state.projects.phase === 'idle') hub.ensureProjects()
+      }, [state.projects.phase, hub])
+      return state.sessionIndex instanceof Map ? state.sessionIndex : EMPTY_INDEX
+    }
+
+    /**
+     * One session's project context. The index only has a session once its project snapshot is
+     * live, so before that the row's cwd (the same rule the PM badge uses) names the project —
+     * that is what lets the first hover pull the snapshot in.
+     */
+    function useSessionIndexEntry(hub, runtime, sessionId) {
+      const state = useHubState(hub)
+      useSessionReactive(runtime)
+      React.useEffect(() => {
+        if (state.projects.phase === 'idle') hub.ensureProjects()
+      }, [state.projects.phase, hub])
+      const index = state.sessionIndex
+      const entry = index instanceof Map && typeof sessionId === 'string' ? index.get(sessionId) : undefined
+      let root = entry ? entry.root : undefined
+      if (!root && runtime && typeof sessionId === 'string') {
+        const summary = runtime.sessionSummary(sessionId)
+        const project = resolveProjectForSession(state.projects.items, summary, sessionId, runtime)
+        if (project && project.exists !== false && project.initialized !== false) root = project.root
+      }
+      // entry/project 是每次 publish 或每次调用重建的对象；effect 只依赖稳定的 root 字符串。
+      React.useEffect(() => {
+        if (!root) return undefined
+        return hub.acquire(root)
+      }, [root, hub])
+      return { state, entry }
+    }
+
+    /**
+     * Hold exactly the roots this seat needs (one SSE each — the sidebar shows one project, not the
+     * registry). The effect depends on the joined key, a stable primitive, so a re-render does not
+     * re-acquire; unmount releases every root it took.
+     */
+    function useRootsLive(hub, roots) {
+      const key = (roots || []).join('\u0000')
+      React.useEffect(() => {
+        if (key === '') return undefined
+        const releases = key.split('\u0000').map((root) => hub.acquire(root))
+        return () => {
+          for (const release of releases) release()
+        }
+      }, [key, hub])
+    }
+
+    /** sidebar.session.row.leading: the role initial of a project Session row. Nothing outside one. */
+    function SessionRoleChip(props) {
+      const t = pickT(props)
+      const { hub, sessionId } = props
+      const index = useProjectIndex(hub)
+      const entry = typeof sessionId === 'string' ? index.get(sessionId) : undefined
+      if (!entry) return null
+      const glyph = roleInitial(entry.role, entry.kind)
+      if (glyph === '') return null
+      const label = entry.role || (entry.kind === PM_ROLE ? t('sessions.kind.pm') : t('sidebar.roleChip', { role: glyph }))
+      return h('span', {
+        className: 'wb-role-chip',
+        'data-tone': roleTone(entry.kind),
+        title: t('sidebar.roleChip', { role: label }),
+        'aria-label': t('sidebar.roleChip', { role: label }),
+      }, glyph)
+    }
+
+    /** sidebar.session.row.hover: project / stage / slice / pending decisions of that Session. */
+    function SessionProjectHover(props) {
+      const t = pickT(props)
+      const { hub, runtime, sessionId } = props
+      const { entry } = useSessionIndexEntry(hub, runtime, sessionId)
+      if (!entry) return null
+      const rows = [
+        entry.projectName ? [t('sidebar.project'), entry.projectName] : null,
+        entry.stage ? [t('sidebar.stage'), entry.stage] : null,
+        entry.sliceTitle ? [t('sidebar.slice'), entry.sliceTitle] : null,
+      ].filter((row) => row !== null)
+      if (rows.length === 0) return null
+      return h('div', { className: 'wb-hover-project', 'data-tone': entry.pendingDecisions > 0 ? 'warn' : undefined },
+        rows.map(([key, value], position) => h('div', { className: 'wb-hover-project-row', key: key + ':' + String(position) },
+          h('span', { className: 'wb-hover-project-key' }, key),
+          h('span', { className: 'wb-hover-project-value', title: value }, value),
+        )),
+        entry.pendingDecisions > 0
+          ? h('div', { className: 'wb-hover-project-row' },
+              h('span', { className: 'wb-hover-project-key' }, t('sidebar.decisions')),
+              h('span', { className: 'wb-hover-project-value' }, String(entry.pendingDecisions)))
+          : null,
+      )
+    }
+
+    /** sidebar.footer.action: one project status button at the sidebar foot (rail keeps the icon). */
+    function SidebarProjectStatus(props) {
+      const t = pickT(props)
+      const { hub, runtime } = props
+      const state = useHubState(hub)
+      const wide = props.wide !== false
+      React.useEffect(() => {
+        if (state.projects.phase === 'idle') hub.ensureProjects()
+      }, [state.projects.phase, hub])
+      const project = React.useMemo(
+        () => pickDefaultProject(state.projects.items, state.selectedRoot, runtime.currentSessionCwd()),
+        [state.projects.items, state.selectedRoot, runtime],
+      )
+      const live = project && project.exists !== false && project.initialized !== false ? [project.root] : []
+      useRootsLive(hub, live)
+      if (!project || project.exists === false || project.initialized === false) return null
+      const name = projectDisplayName(project)
+      // project.stage 是 /projects 里的阶段记录对象（不是字符串），必须经 stageText 归一。
+      const stage = stageText(project.stage)
+      const pending = pendingDecisionsOf(state, project)
+      const text = stage
+        ? t('sidebar.status', { name, stage, count: pending })
+        : t('sidebar.statusShort', { name, count: pending })
+      return h('button', {
+        type: 'button',
+        className: 'wb-sidebar-status',
+        title: text,
+        'aria-label': t('sidebar.statusAria', { text }),
+        onClick: () => runtime.openPanel(),
+      },
+        h(ProjectIcon, { size: 13 }),
+        wide ? h('span', { className: 'wb-sidebar-status-text' }, text) : null,
+      )
+    }
+
+    /** sidebar.session.row.trailing: one non-interactive slice marker (no buttons in that seat). */
+    function SessionSliceMark(props) {
+      const t = pickT(props)
+      const { hub, sessionId } = props
+      const index = useProjectIndex(hub)
+      const entry = typeof sessionId === 'string' ? index.get(sessionId) : undefined
+      if (!entry || !entry.sliceTitle) return null
+      return h('span', {
+        className: 'wb-slice-mark',
+        title: t('sidebar.sliceMark', { slice: entry.sliceTitle }),
+        'aria-hidden': 'true',
+      }, h(SliceIcon, { size: 12 }))
+    }
+
+    /** sidebar.workspaces.session.row.action: the hover button that reveals this row's slice. */
+    function SessionLocateButton(props) {
+      const t = pickT(props)
+      const { hub, runtime, sessionId } = props
+      const { entry } = useSessionIndexEntry(hub, runtime, sessionId)
+      if (!entry || !entry.sliceId) return null
+      const label = t('sidebar.locate')
+      return h('button', {
+        type: 'button',
+        className: 'wb-row-btn',
+        title: label,
+        'aria-label': entry.sliceTitle ? t('sidebar.locateSlice', { slice: entry.sliceTitle }) : label,
+        onClick: () => runtime.openSlice(hub, entry.root, entry.sliceId),
+      }, h(LocateIcon, { size: 14 }))
+    }
+
+    /**
+     * sidebar.workspaces.session.menu.item: one project row in the Session "..." menu.
+     * The slot contract is one `role="menuitem"` button per entry (the menu's keyboard walk
+     * reads the DOM), so each row is its own registration and picks its action from `menuRow`
+     * (supplied by the registration's inject face).
+     */
+    function SessionProjectMenuRow(props) {
+      const t = pickT(props)
+      const { hub, runtime, sessionId, menuRow } = props
+      const { entry } = useSessionIndexEntry(hub, runtime, sessionId)
+      // The slot hands the open-state pair down as a hook; dismiss after acting.
+      const openState = typeof props.useMenuOpenState === 'function' ? props.useMenuOpenState() : undefined
+      const dismiss = () => {
+        if (Array.isArray(openState) && typeof openState[1] === 'function') openState[1](false)
+      }
+      if (!entry) return null
+      if (menuRow === 'copy') {
+        if (!entry.sliceTitle) return null
+        return h('button', {
+          type: 'button',
+          role: 'menuitem',
+          className: 'wb-menu-item',
+          onClick: () => {
+            dismiss()
+            copyText(entry.sliceTitle)
+          },
+        }, h(CopyIcon, { size: 14 }), h('span', null, t('sidebar.copySlice')))
+      }
+      if (menuRow === 'locate') {
+        if (!entry.sliceId) return null
+        return h('button', {
+          type: 'button',
+          role: 'menuitem',
+          className: 'wb-menu-item',
+          title: entry.sliceTitle ? t('sidebar.locateSlice', { slice: entry.sliceTitle }) : t('sidebar.locate'),
+          onClick: () => {
+            dismiss()
+            runtime.openSlice(hub, entry.root, entry.sliceId)
+          },
+        }, h(LocateIcon, { size: 14 }), h('span', null, t('sidebar.locate')))
+      }
+      return h('button', {
+        type: 'button',
+        role: 'menuitem',
+        className: 'wb-menu-item',
+        onClick: () => {
+          dismiss()
+          runtime.openPanel()
+        },
+      }, h(ProjectIcon, { size: 14 }), h('span', null, t('sidebar.openProject')))
+    }
+
     // =============================================================================================
     // Plugin body: dictionaries, one hub/api/runtime per plugin instance, slot registrations.
     // =============================================================================================
@@ -3688,6 +4464,8 @@ window.__ModuleLoader__.load({
           if (payload && payload.root) hub.refreshSnapshot(payload.root, true)
           return result
         },
+        // 导出补偿：阶段推进是人签的字，文件是可再生的派生物，两者解耦。
+        replayExports: (payload) => api.replayExports(payload),
         loadDoc: (root, id, version) => api.doc(root, id, version),
         loadSlice: (root, id) => api.slice(root, id),
         loadTimeline: (root, options) => api.timeline(root, options),
@@ -3702,12 +4480,14 @@ window.__ModuleLoader__.load({
         inject: injected,
       }, WorkbenchPanel))
 
+      // 图标席位要给 hub：owner props 只有 size/active，待决策角标得自己读状态。
       ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
         name: 'sidebar.panellist',
         id: PANEL_KEY,
         order: 6,
         locale: NS,
         label: () => t('panel.title'),
+        inject: injected,
       }, WorkbenchIcon))
 
       ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -3725,6 +4505,77 @@ window.__ModuleLoader__.load({
         locale: NS,
         inject: (sessionId) => Object.assign(injected(), { sessionId }),
       }, PMComposerSummary))
+
+      // 方案 ① 的三个加法席位：官方 ui-workspace 仍然拥有 sidebar.workspaces 与它的子槽，
+      // 我们只在「会话行前格 / 会话行悬停卡 / 侧栏底部」各加一个只读装饰。
+      // 这三个槽都是 root 作用域，inject 不接收 sessionId；行的 sessionId 由渲染点的
+      // ownerProps 传入（owner props 覆盖 inject 同名键）。
+      ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
+        name: 'sidebar.session.row.leading',
+        id: 'wb-role-chip',
+        order: 10,
+        locale: NS,
+        inject: injected,
+      }, SessionRoleChip))
+
+      ctx.slots.inject('sidebar.session.row.hover', () => ctx.slots.register({
+        name: 'sidebar.session.row.hover',
+        id: 'wb-project-hover',
+        order: 10,
+        locale: NS,
+        inject: injected,
+      }, SessionProjectHover))
+
+      ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+        name: 'sidebar.footer.action',
+        id: 'wb-project-status',
+        order: 10,
+        locale: NS,
+        inject: injected,
+      }, SidebarProjectStatus))
+
+      // 会话行行尾：非交互小标记（官方规定这个格子只能放图标，不能放按钮）。
+      ctx.slots.inject('sidebar.session.row.trailing', () => ctx.slots.register({
+        name: 'sidebar.session.row.trailing',
+        id: 'wb-slice-mark',
+        order: 10,
+        locale: NS,
+        inject: injected,
+      }, SessionSliceMark))
+
+      // 会话行悬停按钮：「在项目中定位此切片」。
+      ctx.slots.inject('sidebar.workspaces.session.row.action', () => ctx.slots.register({
+        name: 'sidebar.workspaces.session.row.action',
+        id: 'wb-locate',
+        order: 300,
+        locale: NS,
+        inject: injected,
+      }, SessionLocateButton))
+
+      // 会话「…」菜单：三个独立条目（契约要求「一个条目 = 一个 role=menuitem 按钮」，
+      // 菜单的键盘遍历读 DOM，所以不能在一个条目里塞三个按钮）。
+      // owner 会注入 menuOpenState hook，渲染层包成 useMenuOpenState。
+      for (const row of [{ id: 'wb-menu-open-project', order: 500, key: 'open' }, { id: 'wb-menu-locate', order: 520, key: 'locate' }, { id: 'wb-menu-copy-slice', order: 540, key: 'copy' }]) {
+        ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({
+          name: 'sidebar.workspaces.session.menu.item',
+          id: row.id,
+          order: row.order,
+          locale: NS,
+          inject: () => Object.assign(injected(), { menuRow: row.key }),
+        }, SessionProjectMenuRow))
+      }
+
+      // 全局面板「更多」菜单里一行：直达当前项目（带待决策数）。
+      ctx.slots.inject('sidebar.panellist.actions', () => ctx.slots.register({
+        name: 'sidebar.panellist.actions',
+        id: 'wb-project-row',
+        order: 100,
+        locale: NS,
+        inject: injected,
+      }, PanelMoreMenuItem))
+      // 注意：sidebar.toggle.badge 是 single 槽，官方 ui-settings-general 在那里挂「桌面更新/断连」
+      // 指示器。往那里注册必然遮蔽它（shadowing 会静默杀掉官方能力），因此本项目**不占**该席位；
+      // 折叠态（rail）的待决策提示由 sidebar.panellist 图标上的角标承担——那一排在 rail 里同样可见。
     }
 
     // Test seam for node self-tests: pure transforms, dictionaries and the render-only components.
@@ -3735,6 +4586,9 @@ window.__ModuleLoader__.load({
       __dictionaries: { zh: ZH, en: EN },
       __components: {
         WorkbenchPanel, PMSessionBadge, PMComposerSummary, WorkbenchIcon,
+        SessionRoleChip, SessionProjectHover, SidebarProjectStatus,
+        SessionSliceMark, SessionLocateButton, SessionProjectMenuRow,
+        PanelMoreMenuItem, DecisionCard, DecisionsTab,
         OverviewTab, NodeDetail, StageList, TreeRow, EventRowItem, SessionsTab,
         DocumentsTab, DocumentPreview, DecisionCard, DecisionsTab, TimelineTab,
       },

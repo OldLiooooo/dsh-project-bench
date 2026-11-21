@@ -115,7 +115,7 @@ sessions(id, project_id, name, kind, role, slice_id, parent_session_id, provider
 documents(id, project_id, slice_id, type, logical_key, title, status, current_version, owner_session, stage, created_at, updated_at)
 doc_versions(id, document_id, version, content, content_hash, author_session, event_id, frozen, created_at)
 doc_sections(id, document_id, version, heading, content, content_hash)   -- 派生、可重建；检索按章节片段
-decisions(id, project_id, slice_id, title, question, options_json, recommended, status, irreversible, deadline, decided_by, rationale, created_at, decided_at)
+decisions(id, project_id, slice_id, title, question, options_json, recommended, status, irreversible, deadline, decided_by, rationale, answer, created_at, decided_at)
 evidence(id, project_id, slice_id, task_id, kind, uri, content_hash, command, result_summary, created_by, verified_by, created_at)
 artifacts(id, project_id, slice_id, kind, path, content_hash, bytes, metadata_json, created_at)
 events(id, project_id, seq, at, kind, actor_session, role, slice_id, subject_type, subject_id, payload_json)

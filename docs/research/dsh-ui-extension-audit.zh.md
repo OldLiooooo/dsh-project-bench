@@ -28,7 +28,8 @@
 | 打开/新建会话（PM） | ✅ | `ctx.uiWorkspace.openSession(target)`；`startSession(workspaceId?, {agentPreset})`；`openWorkspace(id, beforeOpen?, {agentPreset})` | `target` 支持 SessionId 与 addressed-subagent；打开后 `selectPanel(null)` 回对话 | ui-workspace/src/client/navigation.ts:44,66-76,88,276,320 |
 | 读团队 roster/任务板 | ⚠️ 有通道 | Lead Session 的 `agentTeam` projection（members/tasks/failure） | 数据是会话投影；根作用域读取方式 **[待验证]** | docs/subsystems/agent-team.md#web-projection；experimental/agent-team/src/projection.ts:105,111,250,270 |
 | 读子会话消息（只读） | ⚠️ 有通道 | Client `ctx.sessions` → Session 的 event window / projections | 不能 import 官方 Chat 组件，只能自绘简化投影；API 公开度 **[待验证]** | docs/subsystems/web-client.md:42-46；session.ts:157,164 |
-| 原生会话列表过滤/隐藏 | ❌ | 无过滤 slot；仅 `sidebar.workspaces.session.menu.item` / `.row.action` 可加动作 | 要「只显示 PM」只能替换 `sidebar`（single）或另做导航面 | ui-workspace/src/client/index.ts:294,317-325；ui-layout/src/client/index.ts:68 |
+| 原生会话列表过滤/隐藏 | ❌ | 无过滤 slot；仅 `sidebar.workspaces.session.menu.item` / `.row.action` 可加动作 | 要「只显示 PM」只能替换 `sidebar`（single）或另做导航面 |
+| **影子替换 `sidebar.workspaces`**（机制层面，§2.3 修正） | ⚠️ 有条件可行 | 该槽为 `single`：不同 `priority` 可共存、最小者渲染；官方占 0，故 `priority<0` 可盖掉 | ① 影子条目不能再声明官方那 5 个子槽（`slot "…" is already declared`），而组件只能渲染自己声明过的子槽（`SlotOwnershipError`）→ 目录选择器 / 行尾归档置顶 / schedule·liveshare 行装饰静默消失；② 需自建 ~6k 行等价物 | ui-workspace/src/client/index.ts:294,317-325；ui-layout/src/client/index.ts:68 |
 | 会话只读（禁止输入） | ❌（未发现） | 无 per-session read-only 策略；access 是 owner/非 owner Peer 的权限模型 | 需自绘只读投影，或改 DSH 本体 | ui-session/src/client/index.ts:171-183；web-client.md:60 |
 | 会话内徽章/常驻条 | ✅ | `conversation.session.header.utilities`（list/session）；`conversation.composer.dock`（list/session） | 宿主已有同 id 项可被同 id 替换（priority 决定） | ui-conversation/src/client/apply.ts:434,460；docs/subsystems/slots.md:62 |
 | 自定义工具卡 | ✅ | `tool.call.toolview`（keyed，按工具名） | 仅影响该工具的展示，不改工具语义 | ui-skill/src/client/index.ts:89-90；slots.md 层级图 |
@@ -57,6 +58,24 @@
 
 - **能做的**：新增面板、入口、跳会话、按 id 打开（含 addressed-subagent 目标）、切换工作区、读工作区/会话列表。
 - **不能做（不建议做）的**：给原生会话树加过滤谓词/隐藏规则；替换工作区切换器组件的内部行为。**整体替换 `sidebar`（single）在 slot 机制上理论可行（priority 覆盖），但需重写工作区/会话/归档/搜索全部语义，属于高风险不可取** [推断][待验证]。
+
+### 2.3 修正（0.2.2-rc.1 实测）：`sidebar.workspaces` 是「可影子、但会传染丢子槽」
+
+原文把这条判成「基本不行」，**准确说法是有条件可行**，机制与代价都在运行版读到了：
+
+- **机制**：`single` 槽的 cell 允许不同 `priority` 共存，升序取最小者渲染；同 `priority` 再注册抛错
+  （`packages/client/ui-slots/src/index.ts:1138-1144` 的 doc、`:1216-1224` 的实现、`:1245-1251` 的 children 冲突检查）。
+  官方 ui-workspace 注册时**不设 priority**（=0），所以 `priority:-1` 的第三方条目胜出。
+- **先例**：`@deepseek-ai/dsh-experimental-liveshare` 用 `priority: -10` 盖掉官方品牌位
+  （`.runtime/dsh-experimental-liveshare/lib/client.js:6125-6137` vs `.runtime/dsh-client-ui-brand-official/lib/client.js:37-38`）。
+- **代价（关键）**：影子注册**不能重述**官方已声明的子槽（0.2.2 运行版为
+  `sidebar.workspaces.directoryFlow` / `.session.row.action` / `sidebar.session.row.leading` / `.trailing` / `.hover`，
+  `.runtime/dsh-client-ui-workspace/lib/client.js:6050-6075`），重述直接抛错；
+  而 `renderSlot` 只对本条目 `children` 声明过的 key 授权（`SlotOwnershipError`，
+  `.runtime/dsh-client-ui-renderer/lib/client.js` 的 `boundRenderSlot`）。两条合起来 →
+  目录选择器、行尾归档/置顶、schedule·liveshare 行装饰**全部静默不再渲染且不报错**。
+- **因此**：v1 采用**只加不减**（`sidebar.session.row.leading` / `.hover` / `sidebar.footer.action` 三个 list 槽），
+  官方浏览区一行不改，见 `docs/workbench-ui-architecture-v1.zh.md` §3.1。
 - **导航语义**：`openSession` 文档注释为「选中会话并显示 Conversation，作为一个 UI 导航动作」；`openWorkspace` 会在必要时**创建/复用**会话，语义比「切换工作区」更重，接 PM 卡片前需在运行版验证。[源码] navigation.ts:37-76
 
 ---

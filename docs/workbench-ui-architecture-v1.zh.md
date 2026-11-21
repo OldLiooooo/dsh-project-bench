@@ -28,7 +28,9 @@ team 在项目面板里只读呈现，树状驾驶舱是项目面板的主视图
 | 决策卡/动作卡 | ✅ 0.2.2 运行版可用 | actionCards 在 0.2.1 源码中 0 命中；实现前用运行版核对，勿依赖旧源码 |
 | 读 team roster/任务板 | ✅ 可以 | Client 读取 Lead 会话的 agentTeam 投影（实验包已有先例） |
 | 打开/新建会话 | ✅ 可以 | ctx.uiWorkspace.openSession / startSession（可指定 preset） |
-| 替换或隐藏核心会话列表 | ❌ 基本不行 | sidebar.workspaces 由 ui-workspace 独占；无过滤 slot；只能自建导航面（或整体替换 sidebar，语义重写，不推荐） |
+| 替换或隐藏核心会话列表 | ❌ 基本不行 | sidebar.workspaces 由 ui-workspace 以 priority 0 占用；同 priority 再注册直接抛错，只能 `priority<0` 影子覆盖（见下条），语义高、风险高，不推荐 |
+| 影子覆盖 sidebar.workspaces（官方机制层面） | ⚠️ **有条件可行**（原判「基本不行」已修正） | 它是 `single` 槽：不同 priority 共存、最小者渲染（`packages/client/ui-slots/src/index.ts:1138-1144,1216-1224`）；官方自己在用（liveshare 用 `priority:-10` 盖 sidebar.brand.mark）。代价：影子条目不能再声明官方那 5 个子槽（重述会抛 `slot "…" is already declared`，`index.ts:1245-1251`），而组件只能渲染自己声明过的子槽（`SlotOwnershipError`，`packages/client/ui-renderer/src/client/scoped-slots.tsx`），于是目录选择器、行尾归档/置顶、schedule/liveshare 行装饰全部静默消失。整块替换需自建 ~6k 行等价物 |
+| 在会话行上叠加项目维度（只加不减） | ✅ 已实现（方案 ①） | `sidebar.session.row.leading` / `.hover` / `sidebar.footer.action` 三个 list 槽各加一个只读装饰；官方列表的分组/排序/搜索一律不碰。见 §3.1 |
 | 会话级只读 | ⚠️ 原生无；自绘侧栏视图可以 | 原生没有 per-session 只读；但可以**不打开原生会话**，在我们的侧栏 tab / 项目面板里自绘只读视图（官方 Chat 组件不可 import） |
 | Canvas / WebGL / three.js | ⚠️ 可行但需评估 | 插件页面是普通 Web 页面（禁 iframe），可自绘 canvas；三方依赖要打进 client bundle，体积/性能需评估 |
 | 替换 app root / iframe / 字面色 | ❌ 禁止 | 平台硬约束；只用主题 token、locale、slot |
@@ -63,6 +65,68 @@ DSH 工作区（原生）
 - 打开项目面板 = 看到项目树 + 「进入 PM 对话」按钮；PM 会话若存在则打开，不存在则按 project-office preset 新建。
 - 项目面板里"新建会话"只创建 PM 会话；任务会话由 PM 内部拉起，用户不直接建。
 - 用户从 DSH 侧栏也能看到原始会话，但产品文案与默认路径都指向项目面板；team 会话行标「只读」。
+
+---
+
+## 3.1 已实现：侧栏「项目维度」三席位（方案 ①，只加不减）
+
+官方 `sidebar.workspaces`（工作区/会话浏览区）**完全不动**：分组、排序、归档筛选、搜索、
+拖拽排序、重命名/删除弹窗都还是 ui-workspace 的。我们只在三个官方已声明的 **list** 槽里
+各追加一个只读装饰，用插件自己的 id，不设 priority，不影子覆盖任何官方 cell。
+
+| 槽位 | 我们注册的 id | 渲染内容 | 数据来源 |
+|---|---|---|---|
+| `sidebar.session.row.leading` | `wb-role-chip` | 角色首字徽章（产/UX/架/码/测/发/复；PM 行 P、子 agent 行 子） | `hub.sessionIndex` → `roleInitial(role, kind)` |
+| `sidebar.session.row.trailing` | `wb-slice-mark` | 行尾切片小图标（该格只能放非交互图标） | 同上，有切片才渲染 |
+| `sidebar.session.row.hover` | `wb-project-hover` | 项目 / 阶段 / 切片 / 待决策数 | 同上，`useSessionIndexEntry` 并为该项目 `acquire` 快照 |
+| `sidebar.workspaces.session.row.action` | `wb-locate` | 悬停按钮「在项目中定位此切片」→ 开面板并选中该切片 | `runtime.openSlice(hub, root, sliceId)` |
+| `sidebar.workspaces.session.menu.item` | `wb-menu-open-project` / `wb-menu-locate` / `wb-menu-copy-slice` | 「…」菜单三行：打开项目工作台 / 定位切片 / 复制切片名 | 一行一个 `role="menuitem"` 按钮（契约要求） |
+| `sidebar.panellist.actions` | `wb-project-row` | 全局面板「更多」菜单里一行：直达当前项目（带待决策数） | `pickDefaultProject` + `pendingDecisionsOf` |
+| `sidebar.footer.action` | `wb-project-status` | 「项目 · 阶段 · 待决策 N」按钮 → 打开项目面板（rail 态只留图标） | 同上 |
+| `sidebar.panellist`（已有图标） | `project-workbench` | 图标右上角待决策红点（owner props 只有 size/active） | `pendingDecisionsOf` |
+
+实现要点（改 `workbench/client.js` 时必须守住）：
+
+1. **数据只走已有通道**：`hub.publish` 里用纯函数 `buildSessionIndex(projects, snapshots)`
+   重算出 `dshSessionId -> {root, projectName, stage, sliceTitle, role, kind, pendingDecisions}`，
+   随 state 一起发布；席位只读它，不 fetch、不轮询、不新建 EventSource。
+2. **只为自己的项目取快照**：`useRootsLive` 的 effect 依赖是拼接后的字符串（稳定原语），
+   卸载时 `release`；不会因为每次 publish 生成新对象而反复 acquire/release。
+   索引项来自 `snapshot.sessions`，而 snapshot 要先 acquire —— 这个先后关系由
+   `useSessionIndexEntry` 的 cwd 兜底打破（`runtime.sessionSummary` + `resolveProjectForSession`）。
+3. **root 作用域槽的 inject 不接收 sessionId**：行的 `sessionId` 来自渲染点 ownerProps
+   （`renderSlot('sidebar.session.row.leading', { sessionId: node.id })`），
+   inject 里只 `inject: injected`。
+4. **项目外会话一律不渲染**：索引里没有该 `dshSessionId`（无项目 / 未初始化 / 会话没登记进项目库）
+   就返回 `null`，不抢别人的行格子。
+5. **不越权**：席位只调用已有的 `runtime.openPanel()`（`ctx.layout.selectPanel`）；
+   不新增 host 路由、不写 DB、不代批决策（`workbench/host/http.js` 路由集合未变）。
+
+全量落点图：`docs/diagrams/sidebar-seats-all.zh.png`（6 个落点 + 定位链路 + 刻意不做的两处）。
+
+测试面（`workbench/tests/e2e/ui-client.test.mjs`，**6 例全过**）：
+
+| 用例 | 锁住什么 |
+|---|---|
+| 11 个槽位注册到位 | 槽名 / 我们自己的 id / **priority 一处都没有** / 五个 single 槽 0 注册（防影子） |
+| 全部席位组件存在 | 11 个组件导出面 |
+| 席位置渲染与沉默 | 项目内渲染、项目外 `null`、未初始化不渲染、rail 态只留图标、卸载 release |
+| 席位纯变换 | 角色字 / 会话索引 / 待决策兜底 / `withKeys` 不改入参 / `sliceSelection` 定位行 / `focusTargetOf` |
+| 定位请求一次性 | 自增 id、同 id 消费两次只成功一次、旧 id 拿不到新请求 |
+| （dev-instance 套件）语法门禁 | 扫描列表不含 `tests/probes`——探针不得劫持 check-syntax 的退出码 |
+
+**「定位此切片」是唯一带状态的交互**：`hub.requestFocus(root, sliceId)` 把一个请求写进
+`state.focusRequest`（自增 id），面板的 effect 消费一次（`hub.consumeFocus(id)`）后清空，
+然后展开 `stage:*`/`slice:*`、选中切片行并切到会话页。一次性语义保证重渲染/二次进入不会重放。
+
+**方案 ① 明确做不到**（要这些只能走影子替换，代价见 §1）：改官方列表的分组/排序/筛选、
+做到「只剩项目视图」、替换工作区行的重命名/删除。
+
+**刻意不做的两件事**（都是"抢 single 槽"= 静默杀掉官方能力，属于方案 ② 的传染式风险）：
+
+- `sidebar.toggle.badge`（折叠态展开按钮里的角标）：官方 ui-settings-general 在那里挂「桌面更新 / 断连」
+  指示器，我们注册就会遮蔽它。折叠态的待决策提示改由 `sidebar.panellist` 图标角标承担——那一排在 rail 里同样可见。
+- `sidebar.brand.mark` / `sidebar.brand.name`：同理，官方品牌位不碰。
 
 ---
 
@@ -176,7 +240,9 @@ Project
 |---|---|---|
 | 项目面板页面 | main（插件注册 keyed panel） | 一个项目面板；内部切换项目 |
 | 侧栏「项目」入口 | sidebar.panellist | 图标+标题+order |
-| 会话列表行装饰 | sidebar.workspaces.session.row.leading/hover（若可用） | 显示角色/切片/只读徽章 |
+| 会话列表行装饰 | sidebar.session.row.leading / .trailing / .hover（**已实现** leading+hover） | 角色首字徽章、项目/阶段/切片/待决策 |
+| 侧栏底部项目状态 | sidebar.footer.action（**已实现**） | 项目 · 阶段 · 待决策 N，点击开面板 |
+| 工作区行右键菜单 | ctx.contextMenus.register({target:'workspace'}) | 只能加自己 id 的一项（官方重命名/删除不可替换） |
 | PM 页头徽章 | conversation.session.header.utilities | 阶段/待决策/回项目 |
 | PM 输入框状态条 | conversation.composer.dock | 项目摘要 |
 | 需求/决策/收工卡 | actionCards / toolview | 人身份操作 |
