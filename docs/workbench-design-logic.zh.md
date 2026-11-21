@@ -17,7 +17,7 @@
 
 | 标记 | 含义 | 例子 |
 |---|---|---|
-| 🟦 **【插件】** | 插件**自身的代码/机制**，装了插件就有 | 27 个工具、24 张表（23 普通 + 1 FTS5 虚拟）、11 个触发器、11 个 UI 槽位 |
+| 🟦 **【插件】** | 插件**自身的代码/机制**，装了插件就有 | 30 个工具、24 张表（23 普通 + 1 FTS5 虚拟）、13 个触发器、11 个 UI 槽位 |
 | 🟩 **【产出】** | 插件**在运行时生成的数据/文件**，属于你的项目 | `project.db` 里的切片/决策、`docs/product/prd-*.md`、`timeline.md` |
 
 **一句话区分**：🟦 是「软件」，🟩 是「软件产生的资料」。
@@ -53,7 +53,7 @@
 | 要什么 | 🟦【插件】如何实现 |
 |---|---|
 | 一个权威源 | SQLite 项目库，且 agent 物理碰不到 |
-| 能拒绝的状态机 | 阶段机 + 门禁 + 租约 + 11 个 DB 触发器 |
+| 能拒绝的状态机 | 阶段机 + 门禁 + 租约 + 13 个 DB 触发器 |
 | 判据来自机器 | 门禁前置机检，调用**仓库自己的**检查器 |
 
 ---
@@ -320,7 +320,7 @@ Event (append-only, seq 连续)
 Lease (切片维度写锁)
 ```
 
-### 3.2 表（v4：**共 24 个**：23 个普通表 + 1 个虚拟表）
+### 3.2 表（v5：**共 24 个**：23 个普通表 + 1 个虚拟表；v5 只加列不加表）
 
 | 表 | 类型 | 作用 |
 |---|---|---|
@@ -339,9 +339,11 @@ Lease (切片维度写锁)
 | **`approval_signers`** | 普通（v4） | 每次审批签名的结构化身份 |
 
 > ⚠️ v1.0 文档写「19 张表」是**错的**；v1.1 修正为 20。v4 新增 4 张表后为 **24 条 CREATE**，
-> 其中 `doc_fts` 是 `CREATE VIRTUAL TABLE`（FTS5），容易被漏数。
+> 其中 `doc_fts` 是 `CREATE VIRTUAL TABLE`（FTS5），容易被漏数。v5 不新增表，
+> 只给 `slices` 加 `verified_by/verified_at/verified_session`、`evidence` 加 `verified_at`、
+> `decisions` 加 `default_option`（Verified Done，见 §3.7）。
 
-### 3.3 触发器（v4：11 个，DB 级）
+### 3.3 触发器（v5：13 个，DB 级）
 
 | 触发器 | 保证 | 版本 |
 |---|---|---|
@@ -356,6 +358,8 @@ Lease (切片维度写锁)
 | `guard_task_session_terminal` | 任务会话终态不可复活（复活会让租约与 attempt 账错位） | v4 |
 | `guard_approval_epoch_monotonic` | 审批代次只能增（批准必须签「某一代快照」） | v4 |
 | `guard_outbox_done_terminal` | 已完成的导出意图不可回退成 pending（否则补偿无限重放） | v4 |
+| `guard_verified_slice_terminal` | 已验收的切片不可回退（验收是一次签字，撤不回） | v5 |
+| `guard_verified_requires_signer` | 写 verified 必须有 verified_by（漏填即拒） | v5 |
 
 > v1.1 之前这些触发器只在 `current<2` 时建立，v3 库永远拿不到后加的触发器。
 > v4 改为每次打开都 `ensureGuards()` 幂等补齐（全部 `IF NOT EXISTS`，无副作用）。
@@ -386,15 +390,21 @@ lease/acquire  lease/release
 export/snapshot  import/inbox  index/backfill
 context/downgrade
 slice/scope  approval/supersede  gate/export_failed  export/replay
+slice/verify  period/roll
 ```
 
 > v4 新增 4 种：切片作用域声明（`slice/scope`）、旧审批作废（`approval/supersede`）、
 > 门禁导出失败（`gate/export_failed`）、导出补偿（`export/replay`）。
+>
+> v5 新增 2 种：切片验收（`slice/verify`）、周期推进（`period/roll`）。
+> `slice/verify` 与 `slice/status` 分开是刻意的：进度统计只认前者，
+> 否则「切片状态变成了 verified」和「有人验收过」会被混成同一件事。
 
 ### 3.6 状态枚举
 
 ```
-slices     open / in_progress / review / blocked / done / archived / cut
+slices     open / in_progress / review / blocked / done / verified / archived / cut
+           （v5 加 verified：done = 交付方自认完成，verified = 独立验收通过；进度只认后者）
 tasks      pending / in_progress / review / blocked / done / failed
 decisions  pending / approved / rejected / superseded / hang
 approvals  pending / approved / rejected
@@ -412,16 +422,16 @@ stages     pending / active / done / retired
    用户 ⇄ PM 会话（preset: project-office）
           任务会话（preset: project-task，命名 角色-切片-动作）
 
-🟦 能力层：27 个工具
-   PM 独有 12 │ 双端共享 11 │ 任务独有 4
-   → PM 可见 23，任务可见 15，普通会话/子 agent 可见 0
+🟦 能力层：30 个工具
+   PM 独有 14 │ 双端共享 11 │ 任务独有 4 │ 验收(qa) 独有 1
+   → PM 可见 26，任务可见 15，验收可见 9，普通会话/子 agent 可见 0
 
 🟦 领域层
    store / docs / leases / export / import
    project（门禁状态机）/ orchestration（派活）
 
 🟦 存储层
-   ProjectDb（单实例）→ 24 表（23 普通 + 1 FTS5 虚拟）+ 11 触发器
+   ProjectDb（单实例）→ 24 表（23 普通 + 1 FTS5 虚拟）+ 13 触发器
    BEGIN IMMEDIATE 串行化；event 与数据同事务
 
 🟦 通道层
@@ -432,16 +442,20 @@ stages     pending / active / done / retired
 
 ### 4.1 工具分配（v1.0 写的「22 + 15 = 37」是误导）
 
-**v4 总数 27**（v1.1 为 26，新增 `slice_scope`），因为 11 个工具两端共享：
+**v5 总数 30**（v4 为 27，v5 新增 `slice_verify` / `session_spawn_qa` / `period_roll`）：
 
 | 类别 | 数量 | 举例 |
 |---|---|---|
-| PM 独有 | 12 | `gate_submit` `session_spawn_task` `slice_create` `decision_create` `project_init` `slice_scope`(v4) |
+| PM 独有 | 14 | `gate_submit` `session_spawn_task` `slice_create` `decision_create` `project_init` `slice_scope`(v4) `session_spawn_qa`(v5) `period_roll`(v5) |
 | 双端共享 | 11 | `project_status` `doc_get` `slice_update` `artifact_add` `doc_freeze` |
+| 验收独有 | 1 | `slice_verify`（PM 与 qa 都能调；**任务会话不能**） |
 | 任务独有 | 4 | `doc_write` `evidence_add` `session_finish_task` `session_task_report` |
 
-> **PM 可见 23，任务可见 15**。v1.0 的「22 + 15 = 37 ≠ 26」是因为共享的 11 个被算了两遍。
-> `slice_scope` 的存在理由：没有声明入口，「片外零改动」的校验永远只能 `verifiable=false`。
+> **PM 可见 26，任务可见 15，验收（qa）可见 9**。v1.0 的「22 + 15 = 37 ≠ 26」是因为共享的 11 个被算了两遍。
+>
+> v5 三个新工具的共同点：**它们都是「不能顺手做」的动作**，所以从状态更新里拆出来单独成工具 ——
+> 验收要有签名人与建造者校验（`slice_verify`）、拉起验收会话不占租约（`session_spawn_qa`）、
+> 推进周期必须可审计（`period_roll`）。
 
 ### 4.2 模块依赖（实际 import）
 
@@ -460,6 +474,82 @@ tools/*       → store, docs, leases, export, import, project, checkers, indexe
 ```
 
 **依赖单向，无环**：`db.js` 不依赖任何领域模块。
+
+---
+
+## 4.5 v5：Verified Done —— 进度终于有了分母
+
+这是把「合格的流程执行器」推向「合格的 PM」的那一步。设计 §6.2 早就定了
+**唯一进度口径 = 已验证完成（Verified Done）**，但 v4 之前：
+
+- `slices` 的状态枚举里没有 `verified`（只有 done）；
+- `evidence.verified_by` 列存在却**从没被写入**；
+- 「建造者不验收」只靠角色卡里一句话 —— 而提示词不算约束（§8 第 1 条）。
+
+### 4.5.1 语义：done ≠ verified
+
+| 状态 | 谁给的 | 含义 |
+|---|---|---|
+| `done` | 交付方（实现会话） | 「我做完了」——自述 |
+| `verified` | 独立验收者 | 「我验过了」——有签名、可追溯 |
+
+**不自动把存量 done 升级成 verified**：那等于伪造验收记录，而 events 是 append-only、事后无法纠正。
+
+### 4.5.2 三道闸（缺一条 verified 就只是改名）
+
+1. **写入路径唯一**：只有 `store.verifySlice` 能写 verified；`updateSliceStatus` 收到 `verified` 直接拒
+   （否则任何一次普通状态更新都能把它写成 verified）。
+2. **建造者不验收**：按该切片**最近一次实现会话**比对（不按角色词判断 —— 角色词是文案，会话 id 是事实），
+   相同即 `SELF_VERIFICATION_DENIED`。
+3. **DB 兜底**：`guard_verified_requires_signer`（没签名人不能写 verified）+
+   `guard_verified_slice_terminal`（verified 不可回退）。
+
+> 第三道闸存在的理由与租约栅栏相同：应用层校验总有绕过路径（别的工具、脚本、直连库），
+> 而**约束要么在 DB，要么在领域函数**。
+
+### 4.5.3 独立验收会话（project-qa）
+
+用 `project-task` 做验收时，「建造者不验收」只剩提示词。所以 v5 加了第三个 preset：
+
+| 边界 | 实现 |
+|---|---|
+| 不写文件 | preset 里 `tool-fs` 的 write/edit/applyPatch 全 false |
+| 不占租约 | 会话 `kind='qa'`，不进 task 的租约路径；`evidence_add` 对它跳过 `assertWriteScope` |
+| 只能记证据 + 签字 | 工具 actors 里只有 `evidence_add` 与 `slice_verify` 允许 `qa` |
+
+验收会话可见 9 个工具（7 读 + `evidence_add` + `slice_verify`），
+**看不到** `doc_write` / `doc_freeze` / `session_finish_task`。
+
+### 4.5.4 进度投影
+
+`snapshot.projectProgress` 是唯一进度出口（面板与 `project_status` 都读它，不各算各的）：
+
+| 字段 | 含义 |
+|---|---|
+| `total` | 参与统计的切片 = verified + inFlight + blocked + notStarted + doneUnverified |
+| `verified` | 分子 |
+| `doneUnverified` | **最容易自我欺骗的一档**：交付方说完了、没人验 —— 单独报，不算进百分比 |
+| `abandoned` | archived/cut（有意不做），**不进分母** |
+| `percent` | verified / total |
+
+### 4.5.5 周期（period）
+
+`period_roll` 是显式动作，不做日历自动滚动：**「这一周期做了什么」是复盘与指标的分母，
+自动按日历滚动会把「跨零点的提交」归到哪个周期变成靠时钟猜的事**。
+推进时把上一周期的验证数定格在 `period/roll` 事件的 payload 里，否则推完就再也算不出历史吞吐。
+
+### 4.5.6 阶段可交付类型（deliverableTypes）
+
+内置模板给每个阶段写了 `deliverableTypes`（S1=prd、S2=ux…），但 v4 之前**从没被读取**。
+v5 让它在 `doc_write` 新建文档时生效，三档结论与 `scope.js` 一致：
+
+| 结论 | 何时 |
+|---|---|
+| `enforced:false, allowed:true` | 阶段没声明类型 / 没有 active 阶段 / 调用方没给 type |
+| `enforced:true, allowed:true` | 声明了且类型在列表里 |
+| `enforced:true, allowed:false` | 声明了但类型不在列表里 → `STAGE_DELIVERABLE_NOT_ALLOWED` |
+
+**只拦新建、不拦追加版本**：给已有文档写新版本时类型已经定了，再拦只会把正常返工卡死。
 
 ---
 
@@ -565,13 +655,20 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 | 门禁双点机检 | `tools.test` 8 例 |
 | 阶段守卫 + 提交快照绑定 | `tools.test` 4 例 |
 | 租约 + 收工校验 | `tools.test` 2 例 |
-| 触发器 7 个 | `db.test` 7 例 |
+| 触发器 13 个 | `db.test` |
 | 14 步业务回放 | 17 / 0 |
 | 真实实例 HTTP/SSE | `instance-http` 10 / 0 |
 | 真实模型会话 | `live-e2e` 4 / 0 |
 | **失败路径 / 栅栏 / 作用域（v4）** | `unit/failure.test.mjs` 16 例 / 15 pass / 1 skip（跳过的是真实 git diff，本沙箱 spawn EPERM） |
 | **身份 / 错误详情 / 预算 / 代次（v4）** | `unit/contracts-v4.test.mjs` 10 / 0 |
-| **v3→v4 迁移** | `unit/db.test.mjs`（触发器 11 个 + 迁移幂等） |
+| **v3→v4 迁移** | `unit/db.test.mjs`（触发器 13 个 + 迁移幂等） |
+| **Verified Done（v5）** | `tools.test` 5 例：签名人落库 / 建造者不验收 / 直写 verified 被拒 / 只有 review·done 能验 / 证据 verified_by 回填 |
+| **独立验收会话（v5）** | `tools.test`：`session_spawn_qa` 用 project-qa preset、不占租约、同切片唯一 active；工具面 9 个 |
+| **进度口径（v5）** | `tools.test`：只认 verified、done 单列、archived/cut 不进分母；`ui-client.test`：前端不重算、越界夹紧 |
+| **周期（v5）** | `tools.test`：`period_roll` 写 meta+事件、上一周期验证数定格、概览 period 跟随 |
+| **阶段可交付类型（v5）** | `tools.test` 3 例：S1 拒 report / 追加版本不受限 / 未声明即不约束 |
+| **决策超时（v5）** | `tools.test`：deadline 与 defaultOption 落库、非法时间被拒 |
+| **文档计数不漂移（v5）** | `scripts/check-doc-counts.mjs`：8 条规范句对照代码实测 |
 
 ### ✅ v1.2（v4）修掉的缺口
 
@@ -594,9 +691,13 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 判据隔离不是安全边界 | 恶意判据仍可读宿主文件（同进程空间，`spawn` EPERM 使进程级隔离不可用） | 中（已在 ADR 明写） |
 | 多人身份不能**强制**分离 | 能追责、不能阻止同人既提又批；无 RBAC | 中 |
-| 58 个空 catch 仍在（共 168 个 catch，2026-11-21 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
-| **`period` 元数据从未写入** | `snapshot.js:122` 读 `db.getMeta('period')`，但全仓库没有任何 `setMeta('period')` —— 周期永远是「当前月」。设计 §5.4 的两周周期**没有数据落点**，路线图/燃起图因此无分母 | 中 |
-| **`deliverableTypes` 只写不读** | 内置 S1–S7 与 `LUMIO_STAGE_TEMPLATE` 都声明了每阶段可交付类型，但门禁与写路径从不读取（仅 `normalizeStageTemplate` 做过校验）。「S1 只能产 prd」目前只是文案 | 中 |
+| 62 个空 catch 仍在（共 173 个 catch，2026-11-21 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| ~~`period` 元数据从未写入~~ | **v5 已修**：`period_roll` 显式推进并写 meta + `period/roll` 事件；不做日历自动滚动（跨零点归属会变成猜） | — |
+| ~~`deliverableTypes` 只写不读~~ | **v5 已修**：`doc_write` 新建文档时按阶段校验（`STAGE_DELIVERABLE_NOT_ALLOWED`）；只拦新建不拦追加 | — |
+| **仍无周期自动提醒/熔断** | `period_roll` 是显式动作，没有「周期到期」判定与 circuit breaker：到期未完成不会强制停 | 中 |
+| **仍无风险/问题/假设三本账** | 设计 §6.4 四本账只落了决策一本；风险 Top-N、问题日志、假设日志都没有表 | 中 |
+| **仍无看板/路线图/燃起图/指标页** | 设计 §7.2 七视图只落了 5 个 tab（概览/会话/文档/决策/时间线）+ 进度卡 | 中 |
+| **验收会话的工具面靠 actors 白名单** | 若将来新增工具忘了收紧，qa 会话可能拿到不该有的工具；没有「qa 不得写入」的自动断言 | 低 |
 | 未做反向登记 | 已有仓库的历史条目还在文档里，没进 DB | 中 |
 | 交付链未接 | commit/push/PR 仍由任务会话自己做 | 低 |
 | 非 git 工作区无法校验作用域 | 只能 `verifiable=false` 如实标注（设计如此，不是缺陷） | 低 |

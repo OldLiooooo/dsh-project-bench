@@ -8,7 +8,11 @@
 
 ## 0. 一句话结论
 
-**治理内核合格，项目经理没合格。**
+> **2026-11-21 第二轮更新**：第一版审计（下方 §1–§7）的结论是「治理内核合格，PM 没合格」，
+> 三条核心武器全缺。第二轮已把 **B1–B7 全部落地为 schema v5**，结论随之改变 ——
+> 详见文末 **§8 v5 落地与结论重估**。下方 §1–§7 保留为第一版快照，不追改（审计要能看出变化过程）。
+
+**（第一版，2026-11-21 上午）治理内核合格，项目经理没合格。**
 
 它是一个很硬的「项目流程执行器 + 审计账本」：权威源搬得出去、非法状态转移真的能拒、门禁判据真的来自机器、
 人批准是唯一出口 —— 这几条设计初衷全部兑现。
@@ -177,3 +181,107 @@ export DSH_HOME='C:/Users/you/repo/.artifacts/dshhome'
 - 自动日报/周报
 
 **一句话**：流程的骨架和关节做成了钢的，肌肉（进度、验收、范围控制）还没长。
+
+---
+
+## 8. v5 落地与结论重估（2026-11-21 第二轮）
+
+第一版审计列出的三条「PM 核心武器全缺」，在同一天的第二轮里全部补上了（schema v4 → v5）。
+
+### 8.1 B1–B7 落地对照
+
+| # | 第一版缺口 | v5 做法 | 证据 |
+|---|---|---|---|
+| B1 | 状态枚举没有 `verified`，「唯一进度口径」在数据模型里没有落点 | `slices` 加 `verified` 状态 + `verified_by/verified_at/verified_session`；唯一写入路径 `store.verifySlice`；`updateSliceStatus` 收 verified 直接拒 | `tools.test` 5 例 |
+| B2 | 没有独立验收 preset，「建造者不验收」只靠角色卡一句话 | 第三个 preset `project-qa`；`kind='qa'` 不占租约；工具 actors 收紧到 9 个；`session_spawn_qa` 拉起 | 工具面断言 + 不占租约断言 |
+| B3 | `deliverableTypes` 只写不读 | `checkDeliverableType` + `doc_write` 新建时校验 → `STAGE_DELIVERABLE_NOT_ALLOWED` | 3 例（拒 report / 追加不受限 / 未声明不约束） |
+| B4 | `deadline` 只有列，工具无参数、UI 不展示 | `decision_create` 加 `deadline`/`defaultOption`；v5 列 `default_option` | deadline 落库 + 非法时间被拒 |
+| B5 | `evidence.verified_by` 从未被写入 | `verifySlice` 回填该切片证据的验收人与时间 | 验收前 undefined / 验收后有值 |
+| B6 | `period` 元数据从未写入 | `period_roll` 显式推进，写 meta + `period/roll` 事件，并把上一周期验证数定格 | 推进两次 + 概览跟随 |
+| B7 | `links` 表从没写入；文档计数会漂 | 验收时连 `evidence → slice (verifies)`；新增 `scripts/check-doc-counts.mjs` | 脚本 8 条规范句全 PASS |
+
+### 8.2 B1 的关键取舍（为什么不「顺手加个状态」）
+
+`done` ≠ `verified`：
+
+| 状态 | 谁给的 | 含义 |
+|---|---|---|
+| `done` | 交付方（实现会话） | 「我做完了」——自述 |
+| `verified` | 独立验收者 | 「我验过了」——有签名、可追溯 |
+
+**不自动把存量 `done` 升级成 `verified`**：那等于伪造验收记录，而 events 是 append-only、事后无法纠正。
+所以迁移只加列不改数据 —— 老项目会显示「已交付未验收 N 项」，这是**如实反映历史**，不是迁移失败。
+
+三道闸缺一条，`verified` 就只是 `done` 的改名：
+
+1. **唯一写入路径**：`updateSliceStatus` 收到 `verified` 直接拒（`INVALID`）；
+2. **建造者不验收**：按该切片**最近一次实现会话**比对（不按角色词 —— 角色词是文案，会话 id 是事实）；
+3. **DB 兜底**：`guard_verified_requires_signer` + `guard_verified_slice_terminal`。
+
+### 8.3 进度终于有了分母
+
+`projectProgress` 是唯一进度出口（面板与 `project_status` 都读它）：
+
+| 字段 | 含义 |
+|---|---|
+| `total` | verified + inFlight + blocked + notStarted + doneUnverified |
+| `verified` | 分子 |
+| `doneUnverified` | **最容易自我欺骗的一档**：交付方说完了、没人验 —— 单列，不算进百分比 |
+| `abandoned` | archived/cut（有意不做），**不进分母** |
+| `percent` | verified / total |
+
+面板加了进度条 + 四个计数卡（已验收 / 进行中 / 阻塞 / 已交付未验收），
+「已交付未验收」单独一行提示 —— 这是最该被看见、也最容易被糊过去的数字。
+
+### 8.4 结论重估
+
+| 设计支柱 | 第一版 | v5 后 | 变化原因 |
+|---|---|---|---|
+| A 权威源 + 数据模型 | 95% | **95%** | 未动 |
+| B 可拒绝状态机 + 门禁 | 90% | **90%** | 未动 |
+| C1 租约 + 栅栏 + 作用域 | 85% | **85%** | 未动 |
+| C2 阶段写路径硬控制 | 0% | **35%** | 只落了「文档类型」这一层；文件路径层仍靠切片作用域（不是阶段作用域） |
+| D 会话编排 | 85% | **90%** | 加了 qa 会话类型与验收 preset |
+| E 人类接口 | 75% | **85%** | deadline/defaultOption 落库（面板展示仍简） |
+| F 驾驶舱 | 70% | **75%** | 加了进度卡；看板/路线图/燃起图/指标页仍缺 |
+| G 度量体系 + 控制回路 | 10% | **40%** | Verified Done + 进度 + 周期三个分母都到位；四本账还缺三本 |
+| H 专家团 | 70% | **80%** | 建造者不验收从文案变成机制 |
+| I 交付链 | 0% | **0%** | 未动（设计写明是后续阶段） |
+
+**新的一句话结论**：
+
+> 它现在是一个**能回答「到哪了、该验收什么、谁验的」的项目运行时**。
+> 仍然不能回答「风险 Top-3 是什么、这个周期该砍什么」—— 因为风险账本与周期熔断还没做（见 BACKLOG N1/N2）。
+
+### 8.5 本轮实跑（全部在 v5 工作树上）
+
+| 套件 | 结果 |
+|---|---|
+| `check-syntax` | PASS（53 文件 / 0 语法 / 0 import） |
+| `check-doc-counts` | PASS（8 条规范句与代码实测一致） |
+| `unit` | **111 / 111 pass**（第一版 99，v5 新增 12 例） |
+| `negative` | 10 / 0 |
+| `ui-client` | 8 / 0（新增 1 例进度纯函数） |
+| `replay-14-steps --strict` | 17 / 0 |
+| `dev-instance` | 8 / 0 |
+| `gate-real-checkers` | 3 / 0 |
+| `governance-e2e` | 26 / 0 / **1 skipped** |
+| `seats-realdata` | PASS |
+| `3d-tree` | 91 / 0 |
+
+### 8.6 一个必须记住的新发现：单写保证依赖沙箱模式
+
+本轮 `governance-e2e` 的 ②c 断言（「会话沙箱写不进真实 `~/.dsh`」）第一次跑出 FAIL，
+追查后确认**不是代码回归，而是本会话的文件策略从 `workspace-write` 变成了 `danger-full-access`** ——
+agent 进程现在真的能写 `~/.dsh`，而且确实在 `storages/project-workbench/` 下留下了探针目录。
+
+这条很关键：
+
+- **「权威源 agent 碰不到」不是插件的属性，是沙箱策略的属性**。插件只负责把库放在正确的位置。
+- 因此 ②c 改成三态：EPERM → PASS；可写且探到真实用户目录 → **SKIP（环境无法验证，不是通过）**；
+  可写且探到非用户目录 → FAIL（探针 bug）。把「无法验证」混成 PASS 或 FAIL 都是坏的。
+- 探针加了 `finally` 自清理，避免向真实目录塞垃圾。
+
+> 这也解释了为什么第一版审计能写「测试进程写 `~/.dsh` 实测 EPERM」：那次会话确实受限。
+> **同一句结论在不同沙箱模式下真假不同**，所以必须连带写明环境。
+
