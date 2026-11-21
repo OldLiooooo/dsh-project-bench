@@ -31,6 +31,32 @@ function safeQuery(fn, fallback) {
   try { return fn() } catch (error) { return fallback }
 }
 
+/**
+ * 进度（v5）：口径与 snapshot.projectProgress 保持**完全相同** ——
+ * 分母排除 archived/cut，doneUnverified 单列不进百分比。
+ *
+ * 为什么不直接 import snapshot.js：L0 是每步注入的热路径，
+ * 而 snapshot 会拉 docs/store 一大串；这里只数两列，代价可忽略。
+ * 但口径必须一致 —— 两处算错一处，PM 说的进度和面板显示的就会对不上。
+ */
+function progressOf(db) {
+  const rows = safeQuery(() => db.db.prepare('SELECT status, COUNT(*) AS n FROM slices WHERE project_id = ? GROUP BY status').all(db.projectId), [])
+  const by = new Map()
+  for (const row of rows) by.set(String(row.status), Number(row.n))
+  const num = (key) => Number(by.get(key) || 0)
+  const verified = num('verified')
+  const doneUnverified = num('done')
+  const inFlight = num('in_progress') + num('review')
+  const blocked = num('blocked')
+  const notStarted = num('open')
+  const total = verified + doneUnverified + inFlight + blocked + notStarted
+  return {
+    total, verified, doneUnverified, inFlight, blocked, notStarted,
+    abandoned: num('archived') + num('cut'),
+    percent: total === 0 ? 0 : Math.round((verified / total) * 100),
+  }
+}
+
 function resolveBudget(explicit) {
   const base = typeof defaultBudget === 'function' ? defaultBudget() : { l0: 400, l1: 300, l2: 900, spare: 400, recall: 500, hardLimit: 2000 }
   const value = { ...base, ...(explicit && typeof explicit === 'object' ? explicit : {}) }
@@ -158,12 +184,25 @@ export function buildL0(db, options = {}) {
     lines.push('当前切片：（PM 未指定；按需 project_status/brief 查询）')
   }
   lines.push('待决策 ' + pendingCount + '｜活跃任务会话 ' + activeTasks)
+  // v5：进度进 L0。PM 若只看到「待决策/活跃会话」，回答「到哪了」就只能现场查 ——
+  // 而设计 §6.2 要求 30 秒内答出三问。这里给最省字的形态：已验收 x/y（z%），外加待验收数。
+  const progress = progressOf(db)
+  const progressLine = progress.total > 0
+    ? ('进度：已验收 ' + progress.verified + '/' + progress.total + '（' + progress.percent + '%）'
+        + (progress.doneUnverified > 0 ? '｜已交付未验收 ' + progress.doneUnverified : '')
+        + (progress.blocked > 0 ? '｜阻塞 ' + progress.blocked : ''))
+    : '进度：（还没有切片）'
+  lines.push(progressLine)
   return lines.join('\n')
 }
 
 /** L1：角色卡（读写边界 + 开工/收工清单），会话启动/切切片时注入。 */
 export function buildL1(options = {}) {
-  const role = options.roleKind === 'pm' ? PM_ROLE : textOf(options.role)
+  // qa 会话没有「角色词」（它不是 7 个任务角色之一），必须显式映射到验收卡，
+  // 否则它的 L1 注入是空串 —— 会话会不知道自己来干什么（v5 接线时踩到的同一个坑）。
+  const role = options.roleKind === 'pm' ? PM_ROLE
+    : options.roleKind === 'qa' ? 'QA'
+    : textOf(options.role)
   return roleCardText(role)
 }
 
@@ -224,7 +263,9 @@ export function buildL2(db, options = {}) {
  */
 export function compileContext(db, options = {}) {
   const budget = resolveBudget(options.budget)
-  const opts = { roleKind: options.roleKind === 'pm' ? 'pm' : 'task', ...options }
+  // 三态：pm / qa / task。qa 不能被降级成 task（那会让它拿到任务角色卡与写心智）。
+  const roleKind = options.roleKind === 'pm' ? 'pm' : options.roleKind === 'qa' ? 'qa' : 'task'
+  const opts = { roleKind, ...options }
   const raw = {
     l0: buildL0(db, opts),
     l1: options.includeL1 === false ? '' : buildL1(opts),

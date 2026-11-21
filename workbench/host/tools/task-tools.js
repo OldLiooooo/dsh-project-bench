@@ -69,6 +69,41 @@ function ensureHandoffDocument(deps, actor, slice, content, titleHint) {
   }
 }
 
+/**
+ * 收工回执里的「下一步」提示（v5）。
+ *
+ * 三类结局，三种下一步：
+ *   交付成功（切片→review）  → PM 该拉独立验收（session_spawn_qa），不是自己 slice_update 成 done
+ *   交付失败（切片→blocked） → PM 该解阻塞或换切片，不是反复重试同一会话
+ *   证据不足                 → 先补证据（理论上收工已被 NO_EVIDENCE 拦住，这里是兜底）
+ *
+ * 注意措辞：这是**建议**不是**强制**。PM 可以不采纳（例如它想先补齐更多交付再一起验），
+ * 但回执必须让它在没有上下文时也能做出正确决定。
+ */
+function buildNextStep(actor, sliceId, finishedSlice, meta) {
+  const sliceLabel = finishedSlice && finishedSlice.key ? finishedSlice.key : sliceId
+  if (meta.status === 'failed') {
+    return {
+      action: 'resolve_blocker',
+      hint: '切片「' + sliceLabel + '」已标记 blocked。PM：查失败原因是外部阻塞还是需要拆小，'
+        + '解掉后重新 session_spawn_task；不要对同一个已结束的会话重复 send。',
+    }
+  }
+  if (meta.evidenceCount === 0) {
+    return {
+      action: 'add_evidence',
+      hint: '本切片没有可复核证据，验收会拒绝。PM：要求补 evidence（命令+输出）后再收工。',
+    }
+  }
+  return {
+    action: 'spawn_qa',
+    hint: '切片「' + sliceLabel + '」已进入 review，可以验收了。'
+      + 'PM：调 session_spawn_qa({sliceKey:"' + sliceLabel + '", action:"验收", prompt:"..."}) 拉起独立验收会话；'
+      + '**不要**用实现会话验收（会被 SELF_VERIFICATION_DENIED 拒），也**不要**直接 slice_update 成 verified（会被拒）。'
+      + '验收会话签字后切片变 verified，L0 的进度自动前进。',
+  }
+}
+
 /** doc_write：任务会话写项目文档（新建或新版本）。 */
 export const docWrite = {
   name: 'doc_write',
@@ -343,7 +378,9 @@ export const sessionFinishTask = {
         + '；作用域 ' + (scopeCheck.verifiable
           ? ('已校验：改动 ' + scopeCheck.counts.changed + ' 个，域内 ' + scopeCheck.counts.inScope + '，域外 ' + scopeCheck.counts.outOfScope)
           : ('未校验（' + (scopeCheck.unresolvedReason || 'unknown') + '）'))
-        + '。' + handoff.slice(0, 400),
+        + '。' + handoff.slice(0, 400)
+        // v5：唤醒消息里直接带「下一步」，因为 PM 先看到的是这条消息，不是工具返回值。
+        + '\n【下一步】' + buildNextStep(actor, sliceId, finishedSlice, { status: status, evidenceCount: evidenceCount }).hint,
     })
     notifyWrite(deps, actor)
     return {
@@ -362,6 +399,16 @@ export const sessionFinishTask = {
       handoff: { docId: handoffDoc.doc.id, version: handoffDoc.version.version, created: handoffDoc.created },
       evidenceCount: evidenceCount,
       files: files,
+      /**
+       * v5：把「下一步该做什么」直接写给 PM。
+       *
+       * 为什么必须由工具返回、而不是靠 PM 自己从角色卡推：
+       *   收工回执是 PM 每一次都会读的东西，而角色卡是每步注入的一段静态文字 ——
+       *   前者能带**这一片的具体状态**（有几条证据、切片现在什么状态），后者只能给一般原则。
+       *   实测教训：v5 做完 verified 后，PM 仍会按旧习惯用 slice_update(status=done) 收尾，
+       *   因为没人告诉它"这一片现在可以验收了"。
+       */
+      nextStep: buildNextStep(actor, sliceId, finishedSlice, { status, evidenceCount }),
       // 作用域校验结果必须回传：这是「片外零改动」从声明变成证据的那一步，人要看得到证据。
       scope: {
         policy: scopeCheck.policy,

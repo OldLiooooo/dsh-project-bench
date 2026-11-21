@@ -51,8 +51,12 @@ const CARDS = {
     reads: '2k 简报、实现报告/交接、代码、证据',
     writes: '测试代码/夹具、测试报告（type=report）、验收证据',
     start: ['读实现交接与验收标准', '设计正向/负向用例', '确认环境与数据准备'],
-    finish: ['执行测试并 evidence_add（原样贴命令与输出摘要）', 'doc_write 测试报告（结论+遗留缺陷）', 'session_task_report + session_finish_task'],
-    guardrails: '独立验证，不改产品代码把测试改绿；缺陷回 PM',
+    finish: [
+      '执行测试并 evidence_add（原样贴命令与输出摘要）',
+      'doc_write 测试报告（结论+遗留缺陷）',
+      'session_task_report + session_finish_task（**测试角色的收工仍不等于验收**：signing 是 slice_verify，只有独立验收会话能调）',
+    ],
+    guardrails: '独立验证，不改产品代码把测试改绿；缺陷回 PM；不代签 slice_verify（那是验收会话的职责）',
   },
   发布: {
     title: '发布工程师',
@@ -79,11 +83,37 @@ export const PM_CARD = {
   word: PM_ROLE,
   title: '项目办公室（PM）',
   stage: '全阶段',
-  reads: 'L0 状态、project_status/brief/recall、文档/时间线/证据',
-  writes: '切片/任务/会话/决策/门禁/导出（project 工具）；不写文档正文、不改代码',
-  start: ['读 L0/L2 确认阶段与在办切片', 'slice_create/task_create 拆活', 'session_spawn_task 派任务会话（角色-切片-动作）'],
-  finish: ['收 session_task_report 与收工回执', '核对证据/交接后推进任务', '需人拍板→decision_create/gate_submit', '门禁通过→export_project'],
-  guardrails: '只与人对话；不代批决策；不亲自写文档/代码；任务会话问题由 PM 汇总成决策卡',
+  reads: 'L0（含进度 x/y）、project_status/brief/recall、文档/时间线/证据',
+  writes: '切片/任务/会话/决策/门禁/导出；不写文档正文、不改代码',
+  start: ['读 L0/L2 确认阶段、在办切片与进度', 'slice_create/task_create 拆活（acceptance 必填）', 'session_spawn_task 派任务会话'],
+  finish: [
+    '收回执（含该切片可否验收）',
+    'review→session_spawn_qa 独立验收；verified 终态，返工开新切片',
+    '决策→decision_create / 门禁→gate_submit / 过→export_project',
+  ],
+  guardrails: '不代批；不写文档/代码；建造者≠验收者；任务问题汇总成决策卡',
+}
+
+/**
+ * 验收会话（qa）角色卡。
+ *
+ * 为什么需要它：v5 加了 project-qa 会话类型，但角色卡表里只有 7 个任务角色 + PM，
+ * 于是 qa 会话的 L1 注入会拿到空串 —— 它会不知道自己是来验收的、更不知道能调什么。
+ * 这正是「加了能力没接线」的同一个病。
+ */
+export const QA_CARD = {
+  word: 'QA',
+  title: '独立验收者',
+  stage: '全阶段（验收点）',
+  reads: 'L0/L2、project_brief、切片验收标准（acceptance）、实现交接与证据、代码与文档',
+  writes: '只写证据（evidence_add）与验收结论（slice_verify）；**不改代码、不改文档、不改测试**',
+  start: ['读 brief 与 acceptance，确认「验什么算过」', '看交接/证据：复跑判据，别只看别人结论'],
+  finish: [
+    '过 → evidence_add 记复核证据，再 slice_verify(verifiedBy=你)',
+    '不过 → 不要 slice_verify；记失败证据+复现步骤，交回 PM',
+    '收工用 session_finish_task 写交接',
+  ],
+  guardrails: '不改代码/测试/文档；验收结论必须可复现（命令+输出）',
 }
 
 /** 角色词是否合法（PM 单独判断）。 */
@@ -91,9 +121,10 @@ export function isKnownRole(word) {
   return typeof word === 'string' && TASK_ROLES.includes(word)
 }
 
-/** 取角色卡元数据：'PM' 返回 PM 卡，其它返回任务角色卡；未知返回 undefined。 */
+/** 取角色卡元数据：'PM' 返回 PM 卡，'QA' 返回验收卡，其它返回任务角色卡；未知返回 undefined。 */
 export function roleMeta(word) {
   if (word === PM_ROLE) return PM_CARD
+  if (word === 'QA' || word === 'qa') return QA_CARD
   return isKnownRole(word) ? CARDS[word] : undefined
 }
 

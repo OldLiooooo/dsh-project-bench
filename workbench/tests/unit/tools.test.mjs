@@ -1163,3 +1163,100 @@ function deps_listDocs(env) {
   return env.db.db.prepare('SELECT * FROM documents WHERE project_id = ?').all(env.db.projectId)
 }
 
+
+
+// ---------------------------------------------------------------------------
+// 闸1：v5 能力必须"接进流程"，不是只存在于工具列表里
+// ---------------------------------------------------------------------------
+
+test('闸1: L0 注入含进度（已验收 x/y），PM 不必现场查就能答「到哪了」', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const a = createSlice(env)
+  const b = store.createSlice(env.db, { key: 'slice-b', title: '第二个切片' })
+  // a 验收掉，b 留着
+  store.updateSliceStatus(env.db, { id: a.id, status: 'review' })
+  await callTool(env, 'slice_verify', { sliceId: a.id, verifiedBy: '老李' }, pm.agent)
+  const { buildL0 } = await import('../../host/context.js')
+  const l0 = buildL0(env.db, { roleKind: 'pm' })
+  assert.match(l0, /进度：已验收 1\/2（50%）/, 'L0 必须带进度，实际：' + l0)
+})
+
+test('闸1: L0 提示「已交付未验收」—— 最容易自欺的一档要显式暴露', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const s = createSlice(env)
+  store.updateSliceStatus(env.db, { id: s.id, status: 'done' })
+  const { buildL0 } = await import('../../host/context.js')
+  const l0 = buildL0(env.db, { roleKind: 'pm' })
+  assert.match(l0, /已交付未验收 1/, 'done 未验收必须在 L0 单列，实际：' + l0)
+  assert.match(l0, /已验收 0\/1（0%）/, 'done 不计入已验收')
+})
+
+test('闸1: 收工回执带 nextStep=spawn_qa，PM 不用猜下一步', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  await callTool(env, 'evidence_add', { kind: 'test', resultSummary: 'node --test → 111 pass' }, task.agent)
+  const finished = await callTool(env, 'session_finish_task', {
+    handoff: '做完了退款状态机，测试全绿', noOutOfScopeChanges: true,
+  }, task.agent)
+  assert.equal(finished.slice.status, 'review', '成功收工切片应进入 review')
+  assert.equal(finished.nextStep.action, 'spawn_qa', '回执应指引 PM 拉验收会话，实际：' + JSON.stringify(finished.nextStep))
+  assert.match(finished.nextStep.hint, /session_spawn_qa/)
+  assert.match(finished.nextStep.hint, /不要.*slice_update/, '必须明确劝阻直接改状态')
+  // PM 收到的消息里也要有下一步（它先看到的是消息，不是工具返回值）
+  const lastMessage = env.messages[env.messages.length - 1]
+  assert.match(JSON.stringify(lastMessage.content), /下一步/, '唤醒 PM 的消息必须带下一步')
+})
+
+test('闸1: 收工失败的回执指引解阻塞，而不是拉验收', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  await callTool(env, 'evidence_add', { kind: 'command', resultSummary: '依赖未就绪：EPERM' }, task.agent)
+  const finished = await callTool(env, 'session_finish_task', {
+    handoff: '被外部依赖挡住', noOutOfScopeChanges: true, status: 'failed', failureCode: 'BLOCKED_DEPENDENCY',
+  }, task.agent)
+  assert.equal(finished.slice.status, 'blocked')
+  assert.equal(finished.nextStep.action, 'resolve_blocker', '失败收工不该指引验收')
+})
+
+test('闸1: QA 会话有 L1 角色卡（v5 之前是空串，会话不知道自己是来验收的）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  createQaSession(env, slice)
+  const { compileContext } = await import('../../host/context.js')
+  const compiled = compileContext(env.db, { roleKind: 'qa', sliceId: slice.id })
+  assert.ok(compiled.parts.l1.length > 0, 'qa 的 L1 不能是空的')
+  assert.match(compiled.parts.l1, /验收/, 'qa 卡必须说明它在验收')
+  assert.match(compiled.parts.l1, /slice_verify/, 'qa 卡必须告诉它能签字')
+})
+
+test('闸1: 三种角色（pm/task/qa）的注入都不超预算、都不降级', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  createTaskSession(env, slice)
+  createQaSession(env, slice)
+  for (const spec of [
+    { roleKind: 'pm' },
+    { roleKind: 'task', role: '码农', sliceId: slice.id },
+    { roleKind: 'qa', sliceId: slice.id },
+  ]) {
+    const { compileContext } = await import('../../host/context.js')
+    const compiled = compileContext(env.db, spec)
+    assert.ok(compiled.used <= 2000, spec.roleKind + ' 超 2k 硬上限：' + compiled.used)
+    assert.equal(compiled.degraded, false, spec.roleKind + ' 不应降级（角色卡写太长会把每步注入都判降级）')
+  }
+})
+
