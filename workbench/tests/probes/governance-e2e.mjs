@@ -10,7 +10,7 @@
 import { copyFile, mkdir, readFile, readdir, rm, writeFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import process from 'node:process'
 
@@ -22,7 +22,14 @@ const SANDBOX = join(WORKSPACE_ROOT, '.sandbox', 'governance-e2e')
 
 // 探针进程=会话沙箱内的进程。真实 $DSH_HOME(storages) 对它是 EPERM —— 这正是 M0 想要的物理隔离。
 // 先把它记成证据，再把本探针自己的 store 指到工作区内（否则连探针都跑不起来）。
-const REAL_DSH_HOME = process.env.DSH_HOME && process.env.DSH_HOME.trim() ? process.env.DSH_HOME.trim() : join(homedir(), '.dsh')
+//
+// ②c 探的必须是「真实用户目录」，不能无条件用 DSH_HOME：其它套件要求把 DSH_HOME 指到工作区内，
+// 而工作区对会话沙箱是可写的 → 会把「测试沙箱可写」误报成「单写未成立」。
+// 因此：DSH_HOME 指到工作区外时才认为它是真实目录，否则回落到 homedir()/.dsh。
+const DSH_HOME_ENV = process.env.DSH_HOME && process.env.DSH_HOME.trim() ? resolve(process.env.DSH_HOME.trim()) : undefined
+const HOME_DSH = join(homedir(), '.dsh')
+const dshHomeOutsideWorkspace = DSH_HOME_ENV && !(DSH_HOME_ENV === WORKSPACE_ROOT || DSH_HOME_ENV.startsWith(WORKSPACE_ROOT + sep))
+const REAL_DSH_HOME = dshHomeOutsideWorkspace ? DSH_HOME_ENV : HOME_DSH
 const REAL_STORE_PROBE = join(REAL_DSH_HOME, 'storages', 'project-workbench', 'probe-writability')
 let sandboxCanWriteRealStore = true
 try { await mkdir(REAL_STORE_PROBE, { recursive: true }) } catch { sandboxCanWriteRealStore = false }

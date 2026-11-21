@@ -109,8 +109,14 @@ const problems = [];
 const footText = flat(foot);
 if (footText.includes('[object Object]')) problems.push('底部状态条出现 [object Object]');
 if (!/·.*·/.test(footText)) problems.push('底部状态条缺少 项目·阶段·待决策 三段');
-const pmChip = C.SessionRoleChip({ t, hub, runtime, sessionId: snap.sessions[0].dshSessionId });
-if (!pmChip || flat(pmChip) !== 'P') problems.push('PM 会话的角色徽章不是 P');
+// 取样要按 kind 找 PM 行，不能假设 sessions[0] 就是 PM —— 真实库里第一条往往是某个任务会话
+// （之前的实现取 sessions[0]，在 lumio 真库上恒判 FAIL，是探针的取样假设过期，不是席位组件坏了）。
+const pmSession = snap.sessions.find((s) => s.kind === 'pm');
+if (!pmSession) problems.push('快照里没有 PM 会话行');
+else {
+  const pmChip = C.SessionRoleChip({ t, hub, runtime, sessionId: pmSession.dshSessionId });
+  if (!pmChip || flat(pmChip) !== 'P') problems.push('PM 会话的角色徽章不是 P');
+}
 if (all.includes('[object Object]')) problems.push('某个席位出现 [object Object]');
 if (!more) problems.push('面板更多行不渲染');
 console.log('');

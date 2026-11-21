@@ -9,7 +9,7 @@
   <img alt="DSH >= 0.2.2-rc.1" src="https://img.shields.io/badge/DSH-%E2%89%A5%200.2.2--rc.1-6f42c1">
   <img alt="Node >= 20" src="https://img.shields.io/badge/node-%E2%89%A5%2020-339933?logo=node.js&logoColor=white">
   <img alt="Platform: DSH Desktop / Web" src="https://img.shields.io/badge/platform-DSH%20Desktop%20%7C%20Web-orange">
-  <a href="#-testing"><img alt="Tests: 58 unit + 4 e2e suites" src="https://img.shields.io/badge/tests-58%20unit%20%2B%204%20e2e-brightgreen"></a>
+  <a href="#-testing"><img alt="Tests: 99 unit + 10 suites" src="https://img.shields.io/badge/tests-99%20unit%20%2B%2010%20suites-brightgreen"></a>
 </p>
 
 <p align="left">
@@ -128,21 +128,25 @@ in the workspace's `.project/`; delete it for a complete cleanup (back up `proje
 
 | Path | Contents |
 |---|---|
-| [`workbench/`](workbench/) | **The plugin** — host runtime (29 modules), client bundle (`client.js`, ~3.7k lines), `cordis.patch.yml`, 2 presets, 7 skill templates, en/zh locales, scripts, tests |
+| [`workbench/`](workbench/) | **The plugin** — host runtime (32 modules), client bundle (`client.js`, 4.6k lines), `cordis.patch.yml`, 2 presets, 7 skill templates, en/zh locales, scripts, tests |
 | [`docs/`](docs/) | Design proposals, architecture blueprints, delivery/acceptance notes, plugin development & publishing guide, research |
 | [`research/`](research/) | Background research material |
 | [`templates/`](templates/) | Plugin skeletons: [`host-bundle/`](templates/host-bundle/) (host-only) and [`ui-decoration/`](templates/ui-decoration/) (with Web UI) |
 | [`poc/`](poc/) | Small platform capability probes |
+| [`3d-tree/`](3d-tree/) | Standalone read-only 3D project tree view over `.project/project.db` (zero deps, vendored three.js, 91 self-tests) |
 
 ### Key documents
 
 - 📦 **[Installation, demo & acceptance](docs/delivery.zh.md)** — start here
+- 🔬 **[Delivery audit 2026-11-21](docs/implementation/delivery-audit-2026-11-21.zh.md)** — design intent vs what actually ships, command by command · **[BACKLOG](docs/implementation/BACKLOG.zh.md)** — the gap list
 - 🏗️ **[Architecture blueprint v1](docs/workbench-architecture-v1.zh.md)** · **[UI architecture](docs/workbench-ui-architecture-v1.zh.md)**
 - 📐 **[Module interface contracts](docs/implementation/contracts-v1.zh.md)** · **[Implementation notes](docs/implementation/implementation-notes.zh.md)**
 - 🧩 **[DSH plugin development & publishing guide](docs/dsh-plugin-guide.zh.md)** — bundle rules, local debugging, npm/tarball/GitHub/market-index publishing
 - 💡 **[Design proposal](docs/project-workbench-design.zh.md)** · **[Kickoff prompt](docs/kickoff-implementation-prompt.zh.md)**
 - 🔍 **[UI extension audit](docs/research/dsh-ui-extension-audit.zh.md)** · **[Platform PoC](docs/research/poc-platform-capabilities.zh.md)**
 - 🧠 **[Layered/sharded memory research](docs/research/layered-sharded-memory-research.zh.md)** · **[Git/CI postmortem](docs/lumio-git-ci-postmortem.zh.md)**
+- ⚖️ **[Governance comparison: repo governance vs plugin mechanism](docs/research/governance-mechanism-comparison.zh.md)** · fact sheets: [lumio](docs/research/governance-facts/lumio-facts.md) / [plugin](docs/research/governance-facts/plugin-facts.md)
+- 🧭 **[Plugin-only governance for lumio: feasibility](docs/research/plugin-only-governance-feasibility.zh.md)** · **[implementation plan (pending approval)](docs/research/plugin-only-governance-implementation-plan.zh.md)** · **[constraint audit](docs/research/governance-facts/plugin-constraint-audit.zh.md)**
 
 > Most design documents are written in Chinese; the plugin UI ships both `en` and `zh` locales.
 
@@ -150,16 +154,26 @@ in the workspace's `.project/`; delete it for a complete cleanup (back up `proje
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (58 cases across 4 files) | `node --test workbench/tests/unit/` | 58/58 |
+| Unit (99 cases across 6 files) | `node --test --test-isolation=none workbench/tests/unit/` | 99 (98 pass / 1 skip) |
 | 14-step business replay | `node workbench/tests/e2e/replay-14-steps.mjs --strict` | 17/17 |
 | Negative / security | `node workbench/tests/e2e/negative.test.mjs` | 10/10 |
-| UI contract | `node workbench/tests/e2e/ui-client.test.mjs` | 3/3 |
-| Instance scripts | `node workbench/tests/e2e/dev-instance.test.mjs` | 7/7 |
-| Real instance HTTP/SSE | `node workbench/tests/e2e/instance-http.mjs` | 10/10 |
-| Real model end-to-end | `node workbench/tests/e2e/live-e2e.mjs` | 4/4 |
+| UI contract | `node workbench/tests/e2e/ui-client.test.mjs` | 7/7 |
+| Instance scripts | `node workbench/tests/e2e/dev-instance.test.mjs` | 8/8 |
+| Real checker probes | `node workbench/tests/probes/gate-real-checkers.mjs` | 3/3 |
+| Governance end-to-end (real lumio copy) | `node workbench/tests/probes/governance-e2e.mjs` | 27/27 |
+| 3D tree view (standalone) | `cd 3d-tree && npm test` | 91/91 |
+| Real instance HTTP/SSE | `node workbench/tests/e2e/instance-http.mjs` | 10/10 · last run 2026-11-19 |
+| Real model end-to-end | `node workbench/tests/e2e/live-e2e.mjs` | 4/4 · last run 2026-11-19 |
 
-All executed with the official commands. See
-[implementation notes](docs/implementation/implementation-notes.zh.md) for evidence and deviations.
+All executed with the official commands. The 2026-11-21 full audit (command-by-command results,
+what was re-run and what was not) is in [delivery audit](docs/implementation/delivery-audit-2026-11-21.zh.md);
+per-round evidence lives in [implementation notes](docs/implementation/implementation-notes.zh.md) and the
+[handoffs](docs/implementation/).
+
+> Two suites cannot run outside the DSH process: `live-inprocess-instance` / `live-governance-http`
+> import `profile-boot` from `app.asar`, and `child_process.spawn` is EPERM in the agent sandbox, so
+> `instance-http` / `live-e2e` need a separately started `dsh web` instance. Dates above are the last
+> verified run, not "it works today".
 
 ### Publishing your own DSH plugin
 
@@ -175,9 +189,15 @@ This repo doubles as a working reference. The short version (full details in the
 
 ### Status & roadmap
 
-The plugin is **feature-complete for v1** and verified end-to-end (see Testing). Design material is
-kept as-is to serve as the blueprint and background. Not yet published to npm or a market index —
-this repository currently distributes source plus a local bundle.
+**v1 governance core is complete and verified end-to-end; the PM layer is not.** The 2026-11-21 audit
+([delivery audit](docs/implementation/delivery-audit-2026-11-21.zh.md)) scored the design pillars:
+authoritative store / rejectable state machine / machine-sourced gate evidence / human-only approval are
+in place (85–95%), while **progress metrics (Verified Done), independent QA verification, cycle & scope
+control, and per-stage write-path enforcement are 0–10%** — the gap list and priorities are in
+[BACKLOG](docs/implementation/BACKLOG.zh.md).
+
+Design material is kept as-is to serve as the blueprint and background. Not yet published to npm or a
+market index — this repository currently distributes source plus a local bundle.
 
 ### License
 
@@ -280,21 +300,25 @@ key 从 credentials refs 读取，绝不硬编码。
 
 | 路径 | 内容 |
 |---|---|
-| [`workbench/`](workbench/) | **插件本体** —— Host 运行时（29 个模块）、Client bundle（`client.js`，约 3.7k 行）、`cordis.patch.yml`、2 个 preset、7 个技能模板、中英 locale、脚本、测试 |
+| [`workbench/`](workbench/) | **插件本体** —— Host 运行时（32 个模块）、Client bundle（`client.js`，4.6k 行）、`cordis.patch.yml`、2 个 preset、7 个技能模板、中英 locale、脚本、测试 |
 | [`docs/`](docs/) | 设计提案、架构施工图、交付/验收说明、插件开发与发布指南、研究资料 |
 | [`research/`](research/) | 背景研究材料 |
 | [`templates/`](templates/) | 插件骨架：[`host-bundle/`](templates/host-bundle/)（纯 Host）与 [`ui-decoration/`](templates/ui-decoration/)（带 Web UI） |
 | [`poc/`](poc/) | 平台能力小探针 |
+| [`3d-tree/`](3d-tree/) | 独立只读 3D 项目树视图（读 `.project/project.db`，零依赖 + 内置 three.js，91 例自测） |
 
 ### 关键文档
 
 - 📦 **[安装 / 演示 / 验收对照](docs/delivery.zh.md)** —— 从这里开始
+- 🔬 **[交付审计 2026-11-21](docs/implementation/delivery-audit-2026-11-21.zh.md)** —— 设计初衷 vs 实际交付，逐条命令可复跑 · **[BACKLOG](docs/implementation/BACKLOG.zh.md)** —— 缺口清单与优先级
 - 🏗️ **[架构施工图 v1](docs/workbench-architecture-v1.zh.md)** · **[UI 架构](docs/workbench-ui-architecture-v1.zh.md)**
 - 📐 **[模块接口契约](docs/implementation/contracts-v1.zh.md)** · **[实现笔记](docs/implementation/implementation-notes.zh.md)**
 - 🧩 **[DSH 插件开发与发布指南](docs/dsh-plugin-guide.zh.md)** —— bundle 规则、本地调试、npm/tarball/GitHub/市场索引发布
 - 💡 **[设计提案](docs/project-workbench-design.zh.md)** · **[实现启动提示词](docs/kickoff-implementation-prompt.zh.md)**
 - 🔍 **[UI 扩展能力审计](docs/research/dsh-ui-extension-audit.zh.md)** · **[平台 PoC](docs/research/poc-platform-capabilities.zh.md)**
 - 🧠 **[分层分片记忆调研](docs/research/layered-sharded-memory-research.zh.md)** · **[Git/CI 治理复盘](docs/lumio-git-ci-postmortem.zh.md)**
+- ⚖️ **[治理机制对比：仓库治理 vs 插件机制（相同/冲突/该选哪种）](docs/research/governance-mechanism-comparison.zh.md)** · 事实底稿：[lumio](docs/research/governance-facts/lumio-facts.md) / [插件](docs/research/governance-facts/plugin-facts.md)
+- 🧭 **[只通过插件治理 lumio：可行性](docs/research/plugin-only-governance-feasibility.zh.md)** · **[实施计划（待批准）](docs/research/plugin-only-governance-implementation-plan.zh.md)** · **[插件约束实测](docs/research/governance-facts/plugin-constraint-audit.zh.md)**
 
 > 设计文档以中文为主；插件 UI 同时提供 `en` 与 `zh` 两套 locale。
 
@@ -302,15 +326,26 @@ key 从 credentials refs 读取，绝不硬编码。
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| 单测（4 个文件 58 例） | `node --test workbench/tests/unit/` | 58/58 |
+| 单测（6 个文件 99 例） | `node --test --test-isolation=none workbench/tests/unit/` | **99（98 pass / 1 skip）** |
 | 14 步业务预演回放 | `node workbench/tests/e2e/replay-14-steps.mjs --strict` | 17/17 |
 | 负向 / 安全 | `node workbench/tests/e2e/negative.test.mjs` | 10/10 |
-| UI 契约 | `node workbench/tests/e2e/ui-client.test.mjs` | 3/3 |
-| 实例脚本 | `node workbench/tests/e2e/dev-instance.test.mjs` | 7/7 |
-| 真实实例 HTTP/SSE | `node workbench/tests/e2e/instance-http.mjs` | 10/10 |
-| 真实模型端到端 | `node workbench/tests/e2e/live-e2e.mjs` | 4/4 |
+| UI 契约 | `node workbench/tests/e2e/ui-client.test.mjs` | 7/7 |
+| 实例脚本 | `node workbench/tests/e2e/dev-instance.test.mjs` | 8/8 |
+| 真实判据探针 | `node workbench/tests/probes/gate-real-checkers.mjs` | 3/3 |
+| 治理端到端（真实 lumio 副本） | `node workbench/tests/probes/governance-e2e.mjs` | 27/27 |
+| 3D 树视图（独立） | `cd 3d-tree && npm test` | **91/91** |
+| 真实实例 HTTP/SSE | `node workbench/tests/e2e/instance-http.mjs` | 10/10 · 末次 2026-11-19 |
+| 真实模型端到端 | `node workbench/tests/e2e/live-e2e.mjs` | 4/4 · 末次 2026-11-19 |
+| 真实 DSH 实例（进程内） | `node workbench/tests/e2e/live-inprocess-instance.mjs` | 15/15 · 末次 2026-11-14 |
+| 真实实例上的治理闭环 | `node workbench/tests/e2e/live-governance-http.mjs` | 13/13 · 末次 2026-11-14 |
 
-全部以官方命令实跑通过。证据与偏差见[实现笔记](docs/implementation/implementation-notes.zh.md)。
+全部以官方命令实跑通过。2026-11-21 的完整核对（逐条命令结果、哪些复跑了哪些没有）见
+[交付审计](docs/implementation/delivery-audit-2026-11-21.zh.md)；逐轮证据见[实现笔记](docs/implementation/implementation-notes.zh.md)
+与[各轮交接](docs/implementation/)。
+
+> 有两个套件**只能在 DSH 进程内**跑：`live-inprocess-instance` / `live-governance-http` 要 import
+> `app.asar` 里的 `profile-boot`；而 `instance-http` / `live-e2e` 需要已启动的 `dsh web` 实例
+> （agent 沙箱里 `child_process.spawn` 是 EPERM，起不来）。上表日期是**末次验证**时间，不代表今天重跑过。
 
 ### 发布你自己的 DSH 插件
 
@@ -325,8 +360,13 @@ key 从 credentials refs 读取，绝不硬编码。
 
 ### 现状与后续
 
-插件 **v1 功能已实现完毕**并端到端验证通过（见测试）。设计资料保持原样，作为施工图与背景。
-目前尚未发布到 npm 或市场索引 —— 本仓库当前分发源码 + 本地 bundle。
+**v1 的治理内核已完成并端到端验证；PM 层没完成。** 2026-11-21 的核对
+（[交付审计](docs/implementation/delivery-audit-2026-11-21.zh.md)）按设计支柱打分：
+权威源 / 可拒绝状态机 / 判据来自机器 / 人批准唯一出口 都已落地（85–95%），
+而**进度度量（Verified Done）、独立验收、周期与范围控制、阶段写路径硬控制 只有 0–10%**
+—— 缺口与优先级见 [BACKLOG](docs/implementation/BACKLOG.zh.md)。
+
+设计资料保持原样，作为施工图与背景。目前尚未发布到 npm 或市场索引 —— 本仓库当前分发源码 + 本地 bundle。
 
 ### 许可
 

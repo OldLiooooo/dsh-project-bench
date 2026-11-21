@@ -17,7 +17,7 @@
 
 | 标记 | 含义 | 例子 |
 |---|---|---|
-| 🟦 **【插件】** | 插件**自身的代码/机制**，装了插件就有 | 26 个工具、19 张表、7 个触发器、11 个 UI 槽位 |
+| 🟦 **【插件】** | 插件**自身的代码/机制**，装了插件就有 | 27 个工具、24 张表（23 普通 + 1 FTS5 虚拟）、11 个触发器、11 个 UI 槽位 |
 | 🟩 **【产出】** | 插件**在运行时生成的数据/文件**，属于你的项目 | `project.db` 里的切片/决策、`docs/product/prd-*.md`、`timeline.md` |
 
 **一句话区分**：🟦 是「软件」，🟩 是「软件产生的资料」。
@@ -53,7 +53,7 @@
 | 要什么 | 🟦【插件】如何实现 |
 |---|---|
 | 一个权威源 | SQLite 项目库，且 agent 物理碰不到 |
-| 能拒绝的状态机 | 阶段机 + 门禁 + 租约 + 7 个 DB 触发器 |
+| 能拒绝的状态机 | 阶段机 + 门禁 + 租约 + 11 个 DB 触发器 |
 | 判据来自机器 | 门禁前置机检，调用**仓库自己的**检查器 |
 
 ---
@@ -421,11 +421,11 @@ stages     pending / active / done / retired
    project（门禁状态机）/ orchestration（派活）
 
 🟦 存储层
-   ProjectDb（单实例）→ 20 表 + 7 触发器
+   ProjectDb（单实例）→ 24 表（23 普通 + 1 FTS5 虚拟）+ 11 触发器
    BEGIN IMMEDIATE 串行化；event 与数据同事务
 
 🟦 通道层
-   HTTP 10 路由（先 requestRejection；v4 增 /identities 与 /exports/replay）
+   HTTP 12 路由（8 GET + 4 POST；先 requestRejection；v4 增 /identities 与 /exports/replay）
    SSE /events 推 revision
    UI 11 槽位（只读派生）
 ```
@@ -569,7 +569,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 | 14 步业务回放 | 17 / 0 |
 | 真实实例 HTTP/SSE | `instance-http` 10 / 0 |
 | 真实模型会话 | `live-e2e` 4 / 0 |
-| **失败路径 / 栅栏 / 作用域（v4）** | `unit/failure.test.mjs` 13 / 0（1 跳过：沙箱不允许 spawn git） |
+| **失败路径 / 栅栏 / 作用域（v4）** | `unit/failure.test.mjs` 16 例 / 15 pass / 1 skip（跳过的是真实 git diff，本沙箱 spawn EPERM） |
 | **身份 / 错误详情 / 预算 / 代次（v4）** | `unit/contracts-v4.test.mjs` 10 / 0 |
 | **v3→v4 迁移** | `unit/db.test.mjs`（触发器 11 个 + 迁移幂等） |
 
@@ -579,7 +579,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 会话失败不记录原因 | `sessions.failure_code/detail/at`；`endSession` 强制给码，幂等结束会补齐 | `unit/failure.test.mjs` |
 | 派活失败不回滚 task | 失败时 `task→pending`、清 assignee、写 `task/status` 事件 | 同上 |
-| 失败路径零测试 | 新增 `failure.test.mjs` 14 例 + `contracts-v4.test.mjs` 10 例 | 同上 |
+| 失败路径零测试 | 新增 `failure.test.mjs` 16 例 + `contracts-v4.test.mjs` 10 例 | 同上 |
 | 人身份只是字符串 | `identities` + `approval_signers` + 来源分级（host/declared/local） | `contracts-v4.test.mjs` |
 | 无重试熔断 | 失败带 `attempt` + `failureCode`；任务回滚，PM 重试不产生幽灵 | `failure.test.mjs` |
 | 门禁判据无隔离 | `worker` 默认 + 超时 terminate + `requireIsolation` 失败关闭 | `failure.test.mjs`、ADR-0001 |
@@ -594,7 +594,9 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 判据隔离不是安全边界 | 恶意判据仍可读宿主文件（同进程空间，`spawn` EPERM 使进程级隔离不可用） | 中（已在 ADR 明写） |
 | 多人身份不能**强制**分离 | 能追责、不能阻止同人既提又批；无 RBAC | 中 |
-| 46 个空 catch 仍在 | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| 58 个空 catch 仍在（共 168 个 catch，2026-11-21 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| **`period` 元数据从未写入** | `snapshot.js:122` 读 `db.getMeta('period')`，但全仓库没有任何 `setMeta('period')` —— 周期永远是「当前月」。设计 §5.4 的两周周期**没有数据落点**，路线图/燃起图因此无分母 | 中 |
+| **`deliverableTypes` 只写不读** | 内置 S1–S7 与 `LUMIO_STAGE_TEMPLATE` 都声明了每阶段可交付类型，但门禁与写路径从不读取（仅 `normalizeStageTemplate` 做过校验）。「S1 只能产 prd」目前只是文案 | 中 |
 | 未做反向登记 | 已有仓库的历史条目还在文档里，没进 DB | 中 |
 | 交付链未接 | commit/push/PR 仍由任务会话自己做 | 低 |
 | 非 git 工作区无法校验作用域 | 只能 `verifiable=false` 如实标注（设计如此，不是缺陷） | 低 |
@@ -620,9 +622,9 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 | # | 歧义点 | v1.0 的错误/模糊 | v1.1 澄清 |
 |---|---|---|---|
 | 1 | 插件 vs 产出 | 全文混在一起 | 全文加 🟦/🟩 标记 + §0.1 |
-| 2 | **表数量** | 写「19 张表」 | **实为 20**（`doc_fts` 是 VIRTUAL TABLE，被漏数） |
-| 3 | **工具 22 + 15** | 看似 37 个工具 | **实为 26**，11 个双端共享被算了两遍 |
-| 4 | **拒绝码数量** | v1.0 写 18；v1.1 首稿写 30 | **实为 32**：仅领域 7 / 仅基础设施 22 / 跨层 3 |
+| 2 | **表数量** | 写「19 张表」 | v1.1 **实为 20**（`doc_fts` 是 VIRTUAL TABLE，被漏数）；v4 **实为 24**（见 §3.2） |
+| 3 | **工具 22 + 15** | 看似 37 个工具 | v1.1 **实为 26**（11 个双端共享被算了两遍）；v4 **实为 27**（加 `slice_scope`） |
+| 4 | **拒绝码数量** | v1.0 写 18；v1.1 首稿写 30 | v1.1 **实为 32**；v4 **实为 35**：仅领域 7 / 仅基础设施 22 / 跨层 3 / v4 新增 3（见 §6.1） |
 | 5 | **「lumio」指哪个** | 文中泛指 | 测试用**副本**（`.sandbox/` 或 `.artifacts/`），**真实仓库未被测试写入** |
 | 6 | **判据归属** | 易误以为插件内置规则 | 判据在**你的仓库** `tools/engineering/`，插件只调用 |
 | 7 | **2k 预算 1600+400** | 像四层 | 三层 1600 + 硬上限 2000，差值给工具结果 |
@@ -641,7 +643,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 
 | 文件 | 内容 |
 |---|---|
-| `project.db` | 20 张表的全部数据（切片/任务/会话/文档/决策/证据/事件） |
+| `project.db` | 24 张表的全部数据（切片/任务/会话/文档/决策/证据/事件） |
 | `project.json` | 项目元信息 + 阶段模板 + checkers 配置 |
 | `inbox/` | 待导入的外部文件 |
 | `packages/` | 外部工作包 |

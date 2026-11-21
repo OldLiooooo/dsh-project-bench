@@ -75,7 +75,7 @@ node workbench/scripts/dev-instance.mjs stop
 | 文档版本/冻结/导出/导入闭环；旧版本可查不可改 | `db.test.mjs`（版本只增 / DOC_FROZEN / 同 hash 幂等 / 导出可重生成 / inbox 导入）+ `acceptance` |
 | 2k 装载预算、按需查询、降级 | `acceptance.test.mjs` 2k 断言（大切片降级 + 硬上限 2000）+ `context.js` 裁剪顺序 |
 | 单写者/租约/写作用域负向测试 | `db.test.mjs`（LEASE_HELD/过期抢占/续期）+ `negative.test.mjs`（未鉴权 401、重复会话、frozen、lease、seq） |
-| PM 拉任务会话、命名/角色/切片/模型可查 | `tools.test.mjs`（spawn 写 sessions 行+租约+activation；when 过滤 PM 22 / 任务 15）+ 真实实例 sessions 表 |
+| PM 拉任务会话、命名/角色/切片/模型可查 | `tools.test.mjs`（spawn 写 sessions 行+租约+activation；when 过滤 PM 23 / 任务 15）+ 真实实例 sessions 表 |
 | 决策/门禁人批准；不可逆二次确认 | `negative.test.mjs` 409 CONFIRM_REQUIRED + `live-e2e` 真实 409→200；工具层无代批工具（replay 断言） |
 | 恢复：DB 备份/重建、导出可重生成、重启后会话可恢复 | `db.test.mjs`（重开 DB 推导 projectId/root、迁移幂等）+ `replay` 第 17 步 + `acceptance` 导出重生成 |
 | 用户只与 PM 交互；任务会话不直接问用户 | `project-task` preset 不含 `ask_user_question`；PM 是唯一 `project-office` 入口（面板只建 PM 会话） |
@@ -93,3 +93,20 @@ UI 侧（`workbench-ui-architecture-v1.zh.md` §8）：侧栏入口、项目树+
 3. **任务会话收工后 DSH agent 仍 idle 存活**（DB 会话已结束、项目工具对其隐藏）；平台无自我 dispose API。
 4. **WebGL/3D**：按 UI 架构只做 2D 树（CSS3D 可选层未启用），不引三方 3D 库。
 5. `.project/project.db` 不入 git（自动生成 `.project/.gitignore`）；`project.json` 与导出的 `docs/` 入 git。
+## 6.1 2026-11-14 变更：权威源外移（M0）
+
+**默认行为变了**：项目库不再放 `<workspace>/.project/`，而是 `$DSH_HOME/storages/project-workbench/<workspaceKey>/`。
+
+| 项 | 之前 | 现在（默认 `home` 模式） |
+|---|---|---|
+| `project.db` / `project.json` / `inbox/` / `packages/` | 工作区 `.project/` | **store**（agent 沙箱 EPERM，物理单写） |
+| `docs/` / `exports/` / `timeline.md` | 工作区 | 工作区（不变；导出投影，进 git） |
+
+- 老库自动兼容：首次打开时若 store 为空而工作区 `.project/` 有数据，会**复制**一次（原件保留，可回滚）。
+- 想恢复旧行为：`PROJECT_WORKBENCH_STORE=local`（单写不成立，仅兼容用）。
+- 自定义位置：`PROJECT_WORKBENCH_STORE=<绝对路径>`。
+- 备份/迁移：直接拷 `$DSH_HOME/storages/project-workbench/` 整个目录。
+- 卸载插件不会删数据；要彻底清理，删该 store 目录 + 工作区的 `.project/`。
+
+门禁判据（[checkers.js](../workbench/host/checkers.js)）：`gate_submit` 会跑 `<root>/tools/engineering/checker.mjs`
+与 `closeout.mjs`（存在才跑），失败即拒；批准前**复跑一次**，提交后判据变了同样拒（`STALE_PRECHECK`）。

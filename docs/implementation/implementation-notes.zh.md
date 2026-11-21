@@ -88,6 +88,182 @@ events 50 条 seq 无空洞、leases 归零。
     node workbench/tests/e2e/instance-http.mjs --strict
     node workbench/tests/e2e/live-e2e.mjs --cookie-file .poc/devhome-cookies.txt
 
+## 3.1 增量：侧栏「项目维度」三席位（方案 ①，2026-11-14）
+
+背景：用户问「别人的 UI 增强插件能改左侧栏，我们为什么不能重写工作区浏览区」。核查后确认
+`sidebar.workspaces` 是 `single` 槽、官方占 `priority 0`，`priority<0` 可影子覆盖但会连带丢子槽
+（详见 `docs/research/dsh-ui-extension-audit.zh.md` §2.3 的修正与 `docs/workbench-ui-architecture-v1.zh.md` §1/§3.1）。
+因此本轮采用**只加不减**：官方浏览区一行不改，只在三个官方 list 槽各追加一个只读装饰。
+
+改动面（4 个文件，+532/-9）：
+
+| 文件 | 改动 |
+|---|---|
+| `workbench/client.js` | +6 个纯函数（`roleInitial/roleTone/indexableRoots/snapshotOf/pendingDecisionsOf/buildSessionIndex`）、hub 派生 `sessionIndex`（publish 时按引用未变则复用）、三个席位组件、3 处 slot 注册、11 条 zh/en 文案、4 组 `wb-*` 样式 |
+| `workbench/tests/e2e/ui-client.test.mjs` | 槽位断言 4→7；新增「侧栏席位纯变换」与「侧栏席位组件渲染/沉默」两例 |
+| `docs/workbench-ui-architecture-v1.zh.md` | §1 能力表修正（新增「影子覆盖有条件可行」一行）+ 新增 §3.1 实现说明 + §7 槽位映射 |
+| `docs/research/dsh-ui-extension-audit.zh.md` | 能力表补一行 + 新增 §2.3「修正：可影子但会传染丢子槽」 |
+
+验证（全部官方命令实跑，2026-11-14）：
+
+    - node workbench/scripts/check-syntax.mjs               PASS（44 文件，0 syntax / 0 import error）
+    - node workbench/tests/e2e/ui-client.test.mjs           passed=5 failed=0（原 3 例 → 5 例）
+    - node workbench/tests/unit/acceptance.test.mjs         passed=17 failed=0
+    - node workbench/tests/unit/api.test.mjs                pass 16 / fail 0
+    - node workbench/tests/unit/db.test.mjs                 pass 14 / fail 0
+    - node workbench/tests/unit/tools.test.mjs              pass 11 / fail 0
+    - node workbench/tests/e2e/negative.test.mjs            passed=10 failed=0
+    - node workbench/tests/e2e/dev-instance.test.mjs        passed=7 failed=0
+    - node workbench/tests/e2e/replay-14-steps.mjs --strict passed=17 failed=0 pending=0
+
+独立复核（impl-reviewer，只读，结论落在 client.js `3d2c60ad` / ui-client.test.mjs `f3363ddd` 这组字节上）：
+A 槽位确为官方 list 槽且用我们自己的 id、无 priority、未触碰 `sidebar.workspaces`；B root 槽 inject 不收
+sessionId、行的 sessionId 来自渲染点 ownerProps；C 席位无 DOM 写/轮询/新 EventSource/fetch；
+D effect 依赖稳定原语且卸载 release（refcount + 1500ms linger）；E `workbench/host/` 零改动、无新路由/无 DB 写；
+F 八条命令全 exit=0。**判定：无阻塞，可以合并。**
+
+复核提的两条非阻塞观察与本轮处置：
+
+1. `unit/db.test.mjs` 偶发一次 `EPERM rename`（原子写在 `.project/exports`、`docs/` 下被占用），
+   与本次改动无关（host/ 未改），随后 18 次连跑全通过 —— 记为本机 Windows 文件占用抖动，不做代码改动。
+2. 「索引来自 snapshot，而 snapshot 需先 acquire」的先后关系：`SessionProjectHover` 已用
+   `runtime.sessionSummary` + `resolveProjectForSession`（按 cwd）兜底 root 打破循环；
+   `SessionRoleChip` 仍只读索引，首次渲染到快照到达前可能无徽章，之后自动补上（渐进增强，非缺陷）。
+
+### 3.2 第二批：剩余 4 个落点 + 定位链路（2026-11-14，同日）
+
+用户「剩下的东西都做完」→ 把方案 ① 七个落点补齐到 6 个（第 1 个是既有图标，只加角标）：
+
+| 落点 | 槽位 | id | 说明 |
+|---|---|---|---|
+| 4 行尾 | `sidebar.session.row.trailing` | `wb-slice-mark` | 非交互切片图标（该格官方规定不能放按钮） |
+| 6 悬停按钮 | `sidebar.workspaces.session.row.action` | `wb-locate` | 「在项目中定位此切片」 |
+| 7 菜单项 | `sidebar.workspaces.session.menu.item` ×3 | `wb-menu-open-project`(500) / `wb-menu-locate`(520) / `wb-menu-copy-slice`(540) | 一行一个 `role="menuitem"`（契约：菜单键盘遍历读 DOM） |
+| — 面板更多菜单 | `sidebar.panellist.actions` | `wb-project-row`(100) | 直达当前项目（带待决策数） |
+| 1 图标 | `sidebar.panellist`（既有） | `project-workbench` | 右上角待决策红点（owner props 只有 size/active，所以读 hub 自绘） |
+
+配套的「定位」链路（唯一带状态的交互）：
+
+```text
+点行尾悬停按钮 / 菜单项
+  → runtime.openSlice(hub, root, sliceId)      // ctx.layout.selectPanel + hub.requestFocus
+  → hub.state.focusRequest = { id: n, root, sliceId }
+  → WorkbenchPanel 的 effect 消费一次：hub.consumeFocus(id) → 清空
+  → setExpanded(withKeys(..., [stage key, slice key])) + setSelected(切片行) + setTab('sessions')
+```
+
+一次性语义由自增 id 保证：重渲染、二次进入、跨项目都不会重放或误伤（有专门测试锁定）。
+
+**刻意不做**（抢 single 槽 = 静默杀掉官方能力，正是方案 ② 的传染式风险）：
+
+- `sidebar.toggle.badge`：官方 ui-settings-general 在那里挂「桌面更新 / 断连」指示器，注册即遮蔽。
+  折叠态待决策提示改由 `sidebar.panellist` 图标角标承担（rail 里同样可见）。
+- `sidebar.brand.mark` / `sidebar.brand.name`：官方品牌位不碰。
+
+本轮验证（全部官方命令实跑）：
+
+    - node scripts/check-syntax.mjs             PASS（44 文件，0 syntax / 0 import error）
+    - node tests/e2e/ui-client.test.mjs         6 例全过（新增「席位置渲染」与「定位请求一次性」两例）
+    - node tests/unit/acceptance.test.mjs       17/0
+    - node tests/unit/api.test.mjs              16/0
+    - node tests/unit/db.test.mjs               23/0（连跑 3 次稳定；含他人 W1 触发器测试）
+    - node tests/unit/tools.test.mjs            11/0
+    - node tests/e2e/negative.test.mjs          10/0
+    - node tests/e2e/dev-instance.test.mjs      7/0
+    - node tests/e2e/replay-14-steps.mjs --strict  17/0
+
+### 3.3 复核提出的阻塞项与修复（2026-11-14）
+
+独立复核（seat-reviewer，锁定字节 client.js `0eb37291` / ui-client.test `58dae431` / schema `408d9f5e` / store `cc8d373f` / db.test `8fdf5cd0`）A~G 全部成立，
+提出 **1 项阻塞**（与侧栏席位无关，但会让验收证据失效）：
+
+> `workbench/scripts/check-syntax.mjs` 被 `workbench/tests/probes/*.mjs` 劫持：
+> 检查器会 import 除 `*.test.mjs` 外的所有 .mjs，而探针在模块顶层就执行并 `process.exit`，
+> 于是退出码来自探针、检查器自己的报告再也没打印过 —— 语法门禁等于失效。
+
+修复（三处，均已复验）：
+
+1. `check-syntax.mjs` 的 `SKIP_DIRS` 增加 `probes`，并在注释里写清原因（探针必须用 `node <file>` 单独跑）。
+2. 两个探针都补 `isMain` 守卫（与仓库其它脚本一致）：被 import 时不执行任何副作用。
+   `w1-migrate-realdb.mjs` 的源库路径改为 `WORKBENCH_REALDB_SRC` 环境变量可覆盖（默认仍指向 lumio 副本），
+   避免「import 即读工作区外路径」。
+3. 加回归用例 `check-syntax: 语法门禁不被 tests/probes 劫持`（dev-instance 套件，8/0）：
+   断言扫描列表里不含 probes、且包含 client.js。
+
+复验：`check-syntax.mjs` 恢复打印自己的报告（44 文件 / 37 parsed / 0 syntax / 0 import error / PASS）；
+`node workbench/tests/probes/w1-guards.mjs` 单独跑仍 PASS；`node -e "import(probe)"` 不再产生副作用。
+
+复核的另一条**保留意见（不阻塞，需记档）**：
+
+> W1 迁移去重删的是 evidence / artifact 行，而这些行对应的 events 是 append-only 保留的
+> （subject_id 指向被删行），迁移后会出现「事件指向已不存在的主体」。
+> 当前没有代码按 subjectId 反查 evidence，故不影响运行，属审计链上的轻微不一致。
+
+处置：本轮不动（属他人 W1 切片，且改动会造成事件与事实的不一致），在此记档，建议后续在治理文档里注明该例外。
+
+### 3.3.1 用真实库跑出来的一个真 bug（已修）
+
+复核通过后，用你机器上**真实项目库**（`C:/Users/oldap/Documents/lumio/.project`，1 项目 / 2 会话 / 4 切片 / 3 待决策）
+的副本喂给真实组件渲染，发现：`/projects` 接口里的 `stage` 是**阶段记录对象**
+`{id,key,name,status,gate,position,...}`，不是字符串。新席位里写了 `String(project.stage)`，
+在真实数据上会渲染成 **`[object Object]`**（测试 fixture 当时用的是字符串，所以没抓到）。
+
+修复：新增 `stageText(stage)` 归一两种线格式（`/projects` 发记录对象、`/snapshot` 发字符串指针），
+三处调用点改用它（底部状态条、会话索引、PM 徽章）。测试 fixture 也改成真实形状并断言
+「不得出现 `[object Object]`」。
+
+新增探针 `workbench/tests/probes/seats-realdata.mjs`：拷真实库 → 建真实 snapshot → 用真实 bundle
+渲染全部席位 → 断言不出现 `[object Object]`、PM 行徽章是 `P`、底部三段式文本齐全。当前输出：
+
+    1) 侧栏图标角标   title="待决策 3 项" 有红点=true
+    2) 底部状态条     "lumio · S1 产品 · 待决策 3"
+    3) PM 行          徽章=P 悬停卡=项目lumio阶段S1 产品待决策3（无定位按钮：PM 无切片）
+       架构行        徽章=架 行尾标记="切片：工作台与仓库基线对账（反向登记）" 定位按钮=有
+    4) 面板更多行     "lumio：打开项目工作台（待决策 3）"
+    RESULT: PASS
+
+### 3.5 决策卡语义缺陷（用户实测反馈，2026-11-14 第三批）
+
+用户反馈原文：「只有 abcd 4个选项；只有批准和驳回按钮，这里的语义不清晰；批准什么东西」
+
+查证后确认这是**真实的设计-实现缺口**，不是文案问题：
+
+1. **选项是纯展示**：`DecisionCard` 把 `options` 渲染成 `<li>` 列表，不可点选。
+   人只能在「A/B/C/D 里挑一条」这件事上没有任何输入手段。
+2. **数据库根本没有地方记「选了哪条」**：`decisions` 表只有 `status`(approved/rejected)、
+   `decided_by`、`rationale`，**没有 answer 列**。也就是说无论选 A 还是 B，
+   落库结果完全一样 —— 「批准」在语义上无法落地。
+   而设计文档 §7.2 明明写的是 `[批准 A] [选 B]`，§5 的 Decision 字段也列了 `answer`。
+3. **「推荐」徽章永远不显示**：`isRecommendedOption` 用严格相等比对，
+   但真实数据里 `recommended` 是**整句**（"扩展本项范围（理由：…）"），
+   而选项 label 只是前半句 → 永不匹配。
+
+修复（跨 schema / host / client 三层）：
+
+| 层 | 改动 |
+|---|---|
+| schema | `SCHEMA_VERSION 2→3`，`migrateV3` 给 decisions 加 `answer TEXT`（幂等，旧库自动升） |
+| store | `switch optionValueOf()` 统一选项机器值（字符串→A/B/C，对象→value??id??字母）；`resolveDecision` 接收并**校验** answer（不存在的选项报 INVALID）；事件 payload 带 answer；`mapDecision` 暴露 answer |
+| project | 透传 answer；`buildWakeText` 新增 `describeAnswer`，唤醒 PM 时明确说「选定：B 全部另立工作项」而不是只说"已批准" |
+| http | `POST /decision` 透传 `answer`；错误码表补 `ANSWER_REQUIRED: 400` |
+| cards | 聊天里的 action card 也支持带 answer |
+| client | 选项变可点 radio；卡片显式写「这次批准的是：B · 全部另立工作项」；按钮文案变「批准 B」；**没选出选项时批准按钮 disabled**；确认弹窗复述选择；推荐项改成前缀/括注双向匹配 |
+
+**分层原则**（重要）：API 层**不**强制 answer（保持向后兼容、不误伤既有调用方与历史数据），
+「多选一时必须点名」的强制放在人操作的那一层（按钮 disabled）。门禁决策（`kind='gate'`）
+的 status 本身即答案，其 options 只是背景陈列，不需要 answer。
+
+测试：db 新增「决策 answer：人来选的是哪一项必须被记住」用例（6 条断言：选项值归一、
+answer 落库、事件携带、非法选项被拒、门禁豁免、驳回也可记）；client 新增「决策卡必须让人
+点名批准哪一项」用例（推荐前缀匹配、默认选中、按钮点名、无推荐时禁用、选项是 radio）。
+
+### 3.4 文档产物
+
+- `docs/diagrams/sidebar-three-options.zh.png` —— 方案 ①②③ 的侧栏对比图（含 0 · 现状解剖）
+- `docs/diagrams/sidebar-option1-detail.zh.png` —— 方案 ① 的 7 个落点细节图
+- `docs/diagrams/sidebar-seats-all.zh.png` —— **全量落地图**：6 个落点 + 定位链路 + 刻意不做的两处
+- 三份绘图脚本同目录存档（`render-sidebar-*.py`），改配色/文案可直接重跑
+
 ## 4. 14 步预演覆盖（架构 §7）
 
 replay-14-steps.mjs 用 fake ctx + 真实 registry/store/docs/leases/export/import/context/project/tools 回放：
