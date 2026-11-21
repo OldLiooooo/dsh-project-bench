@@ -15,7 +15,7 @@ import {
   markSessionStartInjection, noteStep, pendingFullInjection, consumeFullInjection, forgetSessionInjection,
 } from './context.js'
 
-const PROJECT_PRESETS = ['project-office', 'project-task']
+const PROJECT_PRESETS = ['project-office', 'project-task', 'project-qa']
 
 function presetOf(session) {
   return session && session.header ? session.header.agentPreset : undefined

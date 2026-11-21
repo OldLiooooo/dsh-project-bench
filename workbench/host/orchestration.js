@@ -6,8 +6,10 @@ import { findProjectRoot, estimateTokens, truncateToTokens } from './util.js'
 import { compileContext } from './context.js'
 import { roleCardText, taskSessionName } from './roles.js'
 
-export const PROJECT_PRESETS = Object.freeze(['project-office', 'project-task'])
-export const PROJECT_ACTOR_KINDS = Object.freeze(['pm', 'task'])
+export const PROJECT_PRESETS = Object.freeze(['project-office', 'project-task', 'project-qa'])
+// qa（v5）：独立验收会话。它属于项目会话（能看项目工具），但只拿读 + 验收相关的最小工具面，
+// 用 preset 的静态工具面 + 工具 actors 双重收紧 —— 「建造者不验收」不能只靠角色卡里那句话。
+export const PROJECT_ACTOR_KINDS = Object.freeze(['pm', 'task', 'qa'])
 
 const POSITIVE_TTL_MS = 5000
 const NEGATIVE_TTL_MS = 2000
@@ -102,7 +104,7 @@ function computeActor(deps, agent) {
   if (row.status !== 'active') {
     return unknownActor(agent, { preset, root: rootInfo.root, rootInfo, db, session: row, reason: 'session-ended' })
   }
-  const kind = row.kind === 'pm' ? 'pm' : row.kind === 'task' ? 'task' : 'subagent'
+  const kind = row.kind === 'pm' ? 'pm' : row.kind === 'task' ? 'task' : row.kind === 'qa' ? 'qa' : 'subagent'
   return {
     kind,
     dshSessionId,
@@ -149,7 +151,7 @@ export function resolveActor(deps, agent) {
   } catch (error) {
     actor = unknownActor(agent, { error: String(error && error.message ? error.message : error) })
   }
-  const positive = actor.kind === 'pm' || actor.kind === 'task'
+  const positive = actor.kind === 'pm' || actor.kind === 'task' || actor.kind === 'qa'
   actorCache.set(key, { actor, expiresAt: now + (positive ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS) })
   pruneCache()
   return actor

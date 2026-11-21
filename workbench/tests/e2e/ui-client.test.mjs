@@ -446,6 +446,29 @@ export async function makeSuite() {
     H.expectEqual(pure.focusTargetOf({ root: '/p/a', sliceId: '' }), undefined, '没有切片就没有定位目标')
   })
 
+  add('client: v5 进度只认 verified，done 未验收单独一档且不进百分比', async () => {
+    const { exports } = await loadClientBundle()
+    const pure = exports.__pure
+    const H2 = H
+    // 缺字段时返回 undefined（旧快照回退到计数卡），不能崩、不能编一个 0%
+    H2.expectEqual(pure.projectProgress({}), undefined, '无 progress 字段应返回 undefined')
+    H2.expectEqual(pure.projectProgress({ project: {} }), undefined, 'project 里没有 progress 也应 undefined')
+    const progress = pure.projectProgress({
+      project: { progress: { total: 3, verified: 1, inFlight: 1, blocked: 0, notStarted: 0, doneUnverified: 1, abandoned: 1, percent: 33, basis: 'verified-only' } },
+    })
+    H2.expectEqual(progress.verified, 1)
+    H2.expectEqual(progress.total, 3)
+    H2.expectEqual(progress.doneUnverified, 1, 'done 未验收必须单列')
+    H2.expectEqual(progress.percent, 33)
+    // percent 越界要夹紧（后端算错也不能把进度条画到 100% 外）
+    H2.expectEqual(pure.projectProgress({ progress: { total: 1, verified: 1, percent: 250 } }).percent, 100, 'percent 上限夹紧到 100')
+    H2.expectEqual(pure.projectProgress({ progress: { total: 1, verified: 0, percent: -10 } }).percent, 0, 'percent 下限夹紧到 0')
+    // 非数值字段不能变成 NaN
+    const garbage = pure.projectProgress({ progress: { total: 'x', verified: null, percent: 'y' } })
+    H2.expectEqual(garbage.total, 0)
+    H2.expectEqual(garbage.percent, 0)
+  })
+
   add('client: 决策卡必须让人点名「批准哪一项」且推荐项能被识别', async () => {
     const { exports, react } = await loadClientBundle()
     const cleanups = []

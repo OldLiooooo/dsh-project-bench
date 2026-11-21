@@ -111,6 +111,44 @@ export function sliceStageKey(db, sliceId) {
 // 驾驶舱投影
 // ---------------------------------------------------------------------------
 
+/**
+ * 项目进度（v5）：唯一口径 = 已验证完成（Verified Done）。
+ *
+ * 设计 §6.2 的 13 个指标都建在这一个分母上，所以它必须是**可解释的**：
+ * 只给一个百分比没有意义，必须能回答「差的那些卡在哪个状态」。
+ *
+ * 口径约定：
+ *   - total：参与统计的切片 = 排除 archived / cut（它们是有意不做的，算进分母会永久拉低进度）；
+ *   - verified：status='verified'；
+ *   - inFlight：in_progress / review（正在做或等待验收）；
+ *   - blocked：blocked（阻塞，PM 该去解的）；
+ *   - abandoned：archived / cut（裁剪掉的，单独报，不进分母）。
+ * @returns {{total:number, verified:number, inFlight:number, blocked:number, notStarted:number,
+ *            abandoned:number, percent:number, basis:string}}
+ */
+export function projectProgress(db) {
+  const rows = db.db.prepare("SELECT status, COUNT(*) AS n FROM slices WHERE project_id = ? GROUP BY status").all(db.projectId)
+  const byStatus = new Map()
+  for (const row of rows) byStatus.set(String(row.status), Number(row.n))
+  const num = (key) => Number(byStatus.get(key) || 0)
+  const verified = num('verified')
+  const inFlight = num('in_progress') + num('review')
+  const blocked = num('blocked')
+  const notStarted = num('open')
+  const doneUnverified = num('done')
+  const abandoned = num('archived') + num('cut')
+  const total = verified + inFlight + blocked + notStarted + doneUnverified
+  const percent = total === 0 ? 0 : Math.round((verified / total) * 100)
+  return {
+    total, verified, inFlight, blocked, notStarted,
+    /** done 但未验收：这是最容易自我欺骗的一档，单独报出来。 */
+    doneUnverified,
+    abandoned,
+    percent,
+    basis: 'verified-only',
+  }
+}
+
 export function overview(db, root) {
   const project = db.project() || {}
   const stages = listStages(db)
@@ -119,8 +157,19 @@ export function overview(db, root) {
   const blockedSlices = countRows(db, 'slices', "status = 'blocked'")
   const documents = countRows(db, 'documents')
   const createdAt = project.created_at || null
-  const period = db.getMeta('period') || (createdAt ? String(createdAt).slice(0, 7) : new Date().toISOString().slice(0, 7))
-  const health = blockedSlices > 0 ? 'blocked' : pendingDecisions > 0 ? 'attention' : 'on_track'
+  // v5：period 由 period_roll 显式写入（此前只在读侧存在、无人写 → 周期永远是当月）。
+  const period = db.getMeta('period.current') || (createdAt ? String(createdAt).slice(0, 7) : new Date().toISOString().slice(0, 7))
+  const periodIndex = Number(db.getMeta('period.index') || 0)
+  const periodStartedAt = db.getMeta('period.startedAt') || null
+  // v5：进度只认 verified。设计 §6.2「唯一原子 = 已验证完成」——done 是交付方自认完成，
+  // verified 才是独立验收通过。这里给出分母/分子/百分比，以及可解释的「为什么没满」。
+  const progress = projectProgress(db)
+  // 健康度：有阻塞 → blocked；有待决策 → attention；有活但没做完 → on_track；
+  // 全部验收完（且不是空项目）→ done。
+  const health = blockedSlices > 0 ? 'blocked'
+    : pendingDecisions > 0 ? 'attention'
+    : (progress.total > 0 && progress.verified === progress.total) ? 'done'
+    : 'on_track'
   return {
     project: {
       id: db.projectId,
@@ -128,6 +177,8 @@ export function overview(db, root) {
       root: root || db.root || project.root || '.',
       stage,
       period,
+      periodIndex,
+      periodStartedAt,
       health,
       createdAt,
     },
@@ -142,6 +193,8 @@ export function overview(db, root) {
       evidence: countRows(db, 'evidence'),
       pendingDecisions,
     },
+    /** v5：进度（唯一口径 = verified）。面板/工具/PM 都读这一个字段，不各算各的。 */
+    progress,
     stage,
     stages,
   }
@@ -307,7 +360,8 @@ export function buildSnapshot(db, options = {}) {
   return {
     initialized: true,
     revision: db.revision(),
-    project: { ...ov.project, counts: ov.counts },
+    project: { ...ov.project, counts: ov.counts, progress: ov.progress },
+    progress: ov.progress,
     stages: ov.stages,
     tree: treeResult.groups,
     truncated: treeResult.truncated,

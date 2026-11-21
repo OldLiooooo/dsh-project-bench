@@ -172,3 +172,83 @@
               searchTimeoutMs: 60000
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
+
+# ── 5) 独立验收 preset（project-qa；v5 Verified Done） ─────────────────────────
+# 为什么单独一个 preset：用 project-task 做验收时，「建造者不验收」只剩角色卡里一句话。
+# 验收会话必须：不写文件、不占租约、只能记证据 + 签字。这三条靠 preset 静态工具面 + 工具 actors 双重保证。
+- insert:
+    - id: preset-project-qa
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: project-qa
+        name: 项目验收会话
+        description: 独立验收会话（验收-切片-动作）：只读工作区、不写产品代码、不占租约，产出验收证据并可调 slice_verify 签字。
+        order: 12
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是软件项目工作台的「独立验收会话」（当前模型 {{model}}）。会话名是「验收-切片-动作」。
+                你的职责是独立验证交付是否达到验收标准：读代码、读文档、跑测试、看证据，
+                **不改产品代码、不改测试把红的改成绿的、不写文档正文**。
+                验收通过就调 slice_verify 签字（verifiedBy 写你的身份）；不通过就 evidence_add 记录失败证据并写清复现步骤。
+                你只对 PM 负责，不直接向用户提问；有需要人拍板的事交回 PM。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          # 只读 fs：能读代码与文档，不能写/edit/applyPatch —— 验收者改代码等于既当运动员又当裁判。
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          # 允许跑测试/命令：验收的核心动作是「复跑判据」，禁 bash 就等于让人只读不看结果。
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+# 注意：不挂 delegation（验收会话不该再拉子 agent）、不挂 tool-web（不要把外部材料当证据）、
+# 不挂 tool-ask-user（验收者不直接问用户）。
+

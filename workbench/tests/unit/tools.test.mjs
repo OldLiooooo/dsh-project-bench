@@ -24,8 +24,8 @@ const EXPECTED_TOOLS = [
   'artifact_add', 'decision_create', 'doc_export', 'doc_freeze', 'doc_get', 'doc_list', 'doc_write',
   'evidence_add', 'export_project', 'file_index', 'gate_submit', 'import_inbox', 'project_brief',
   'project_init', 'project_status', 'project_recall', 'session_finish_task', 'session_send_task',
-  'session_spawn_task', 'session_task_report', 'slice_create', 'slice_list', 'slice_scope', 'slice_update',
-  'task_create', 'task_list', 'task_update',
+  'period_roll', 'session_spawn_qa', 'session_spawn_task', 'session_task_report', 'slice_create',
+  'slice_list', 'slice_scope', 'slice_update', 'slice_verify', 'task_create', 'task_list', 'task_update',
 ]
 
 function createEnv() {
@@ -127,6 +127,18 @@ function createTaskSession(env, slice) {
   return { row, agent: agentFor('dsh-task-1', env.root, 'project-task') }
 }
 
+function createQaSession(env, slice) {
+  const name = '验收-' + slice.key + '-验收'
+  const row = store.createSession(env.db, {
+    name,
+    kind: 'qa',
+    role: '测试',
+    sliceId: slice.id,
+    dshSessionId: 'dsh-qa-1',
+  })
+  return { row, agent: agentFor('dsh-qa-1', env.root, 'project-qa') }
+}
+
 function assertToolError(promise, code) {
   return assert.rejects(promise, (error) => {
     assert.equal(error && error.code, code, '期望错误 code=' + code + '，实际 ' + (error && error.code) + ' / ' + (error && error.message))
@@ -134,7 +146,7 @@ function assertToolError(promise, code) {
   })
 }
 
-test('工具清单与契约一致（27 个，含 file_index 与 v4 的 slice_scope），且都带 JSON Schema 参数与输出声明', (t) => {
+test('工具清单与契约一致（30 个，含 v4 的 slice_scope 与 v5 的 slice_verify/session_spawn_qa/period_roll），且都带 JSON Schema 参数与输出声明', (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const catalog = toolCatalog(env.ctx, env.deps)
@@ -153,14 +165,14 @@ test('工具清单与契约一致（27 个，含 file_index 与 v4 的 slice_sco
   }
 })
 
-test('when 过滤：PM 看 23 个、任务会话看 15 个、普通/子 agent 看 0 个', async (t) => {
+test('when 过滤：PM 看 26 个、任务会话看 15 个、验收会话看 9 个、普通/子 agent 看 0 个', async (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const pm = createPm(env)
   const slice = createSlice(env)
   const task = createTaskSession(env, slice)
   const pmVisible = visibleToolNames(env, pm.agent)
-  assert.equal(pmVisible.length, 23)
+  assert.equal(pmVisible.length, 26)
   assert.ok(pmVisible.includes('session_spawn_task'))
   assert.ok(pmVisible.includes('project_status'))
   assert.ok(pmVisible.includes('gate_submit'))
@@ -172,8 +184,18 @@ test('when 过滤：PM 看 23 个、任务会话看 15 个、普通/子 agent �
   assert.equal(taskVisible.length, 15)
   assert.ok(taskVisible.includes('doc_write'))
   assert.ok(taskVisible.includes('session_finish_task'))
-  for (const hidden of ['session_spawn_task', 'session_send_task', 'gate_submit', 'export_project', 'project_init']) {
+  for (const hidden of ['session_spawn_task', 'session_send_task', 'gate_submit', 'export_project', 'project_init', 'slice_verify']) {
     assert.ok(!taskVisible.includes(hidden), '任务会话不应看到 ' + hidden)
+  }
+  // v5：验收会话的工具面必须窄 —— 能读、能记证据、能签字，但**不能写文档/收工**。
+  const qa = createQaSession(env, slice)
+  const qaVisible = visibleToolNames(env, qa.agent)
+  assert.deepEqual(qaVisible.slice().sort(), [
+    'doc_get', 'doc_list', 'evidence_add', 'project_brief', 'project_recall',
+    'project_status', 'slice_list', 'slice_verify', 'task_list',
+  ])
+  for (const hidden of ['doc_write', 'doc_freeze', 'session_finish_task', 'session_task_report', 'gate_submit', 'slice_create']) {
+    assert.ok(!qaVisible.includes(hidden), '验收会话不应看到 ' + hidden)
   }
   // 非项目会话（standard preset）与子 agent 整组隐藏
   const plain = agentFor('dsh-plain', env.root, 'standard')
@@ -894,3 +916,250 @@ test('角色卡 L1 注入：8 个角色都有完整文案，且不出现 undefin
   assert.ok(!compiled.parts.l1.includes('undefined'), 'L1 编译结果不得含 undefined')
   assert.ok(compiled.used <= 2000, '2k 硬上限')
 })
+
+
+// ---------------------------------------------------------------------------
+// v5：Verified Done —— 「进度唯一口径」的写入点
+// ---------------------------------------------------------------------------
+
+test('v5 验收：review → verified 记录签名人；建造者不验收；verified 是终态', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const qa = createQaSession(env, slice)
+  // 先让切片处于可验收状态（任务收工会写 review）
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'review' })
+
+  // ① 建造者不验收：以该切片最近一次实现会话（task）的身份验收 → 拒
+  await assertToolError(callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '码农本人' }, task.agent), 'PERMISSION_DENIED')
+  // 即使绕过工具 actors（领域层直调）也必须拒 —— 双保险
+  assert.throws(
+    () => store.verifySlice(env.db, { id: slice.id, verifiedBy: '码农本人', verifierSession: 'dsh-task-1' }),
+    (error) => error.code === 'SELF_VERIFICATION_DENIED'
+  )
+  assert.equal(store.getSlice(env.db, slice.id).status, 'review', '被拒后切片状态不变')
+
+  // ② 独立验收会话验收 → 成功，记录签名人与时间
+  const result = await callTool(env, 'slice_verify', {
+    sliceId: slice.id, verifiedBy: '老李', resultSummary: '复跑 99 例全绿，接口契约对齐',
+  }, qa.agent)
+  assert.equal(result.slice.status, 'verified')
+  assert.equal(result.slice.verifiedBy, '老李')
+  assert.ok(result.slice.verifiedAt, '验收时间必须落库')
+
+  // ③ verified 是终态：普通状态更新不能把它改回去（DB 触发器兜底）
+  assert.throws(
+    () => store.updateSliceStatus(env.db, { id: slice.id, status: 'in_progress' }),
+    (error) => /SLICE_VERIFIED_TERMINAL/.test(String(error.message))
+  )
+  // ④ 不能重复验收
+  await assertToolError(callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, qa.agent), 'INVALID')
+
+  // ⑤ 时间线留痕：slice/verify 事件与 slice/status 分开，进度统计按前者算
+  const verifyEvents = env.db.listEvents({ kinds: ['slice/verify'] })
+  assert.equal(verifyEvents.length, 1)
+  assert.equal(verifyEvents[0].payload.verifiedBy, '老李')
+})
+
+test('v5 验收：普通 slice_update 不能直写 verified（否则 verified 只是改名）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'review' })
+  await assertToolError(callTool(env, 'slice_update', { id: slice.id, status: 'verified' }, pm.agent), 'INVALID')
+  assert.equal(store.getSlice(env.db, slice.id).status, 'review')
+})
+
+test('v5 验收：只有 review/done 能验收，open/in_progress 拒绝（没交付就验收 = 走过场）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  await assertToolError(callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, pm.agent), 'INVALID')
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'in_progress' })
+  await assertToolError(callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, pm.agent), 'INVALID')
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'done' })
+  const ok = await callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, pm.agent)
+  assert.equal(ok.slice.status, 'verified')
+})
+
+test('v5 验收：证据的 verified_by 被回填（B5：此前只读不写）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const evidence = await callTool(env, 'evidence_add', {
+    kind: 'test', resultSummary: 'node --test → 99 pass',
+  }, task.agent)
+  assert.equal(evidence.evidence.verifiedBy, undefined, '验收前证据没有验收人')
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'review' })
+  await callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, pm.agent)
+  const after = store.getEvidence(env.db, evidence.evidence.id)
+  assert.equal(after.verifiedBy, '老李', '验收后证据的 verified_by 必须被回填')
+  assert.ok(after.verifiedAt, '证据验收时间也要有')
+})
+
+test('v5 验收会话：session_spawn_qa 拉起 project-qa，不占租约、命名带「验收-」', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const spawned = await callTool(env, 'session_spawn_qa', {
+    sliceId: slice.id, action: '验收', prompt: '复跑测试并核对契约',
+  }, pm.agent)
+  assert.equal(spawned.name, '验收-' + slice.key + '-验收')
+  const activation = env.activations[env.activations.length - 1]
+  assert.equal(activation.request.agentPreset, 'project-qa', '验收会话必须用 project-qa preset')
+  // 不占租约：该切片的租约表里不应该出现验收会话
+  const lease = env.db.db.prepare('SELECT * FROM leases WHERE slice_id = ?').get(slice.id)
+  assert.equal(lease, undefined, '验收会话不应占租约')
+  // 同切片第二个验收会话被拒
+  await assertToolError(callTool(env, 'session_spawn_qa', {
+    sliceId: slice.id, action: '复验', prompt: 'x',
+  }, pm.agent), 'DUPLICATE_ACTIVE_SESSION')
+})
+
+
+
+// ---------------------------------------------------------------------------
+// v5：决策超时（B4）与周期推进（B6）
+// ---------------------------------------------------------------------------
+
+test('v5 决策：deadline 与 defaultOption 落库，非法时间被拒', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const created = await callTool(env, 'decision_create', {
+    title: '是否延期三天', question: '对账要不要进本周期？',
+    options: ['A 延期 3 天', 'B 不延期'], recommended: 'A',
+    deadline: '2026-12-01T18:00:00+08:00', defaultOption: 'A 延期 3 天',
+  }, pm.agent)
+  assert.ok(created.decision.deadline, 'deadline 必须落库')
+  assert.equal(created.decision.defaultOption, 'A 延期 3 天')
+  // 非法时间不许静默丢弃
+  await assertToolError(callTool(env, 'decision_create', {
+    title: 'x', question: 'y', options: ['A'], deadline: '不是时间',
+  }, pm.agent), 'INVALID')
+})
+
+test('v5 周期：period_roll 写 meta 与事件，并把上一周期的验证数定格', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'review' })
+  await callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, pm.agent)
+
+  const first = await callTool(env, 'period_roll', { note: '第一个周期收尾' }, pm.agent)
+  assert.equal(first.period.index, 1)
+  assert.equal(first.previous.current, null, '首次推进前没有周期')
+  assert.equal(env.db.getMeta('period.current'), first.period.current)
+  const rollEvents = env.db.listEvents({ kinds: ['period/roll'] })
+  assert.equal(rollEvents.length, 1)
+  assert.equal(Number(rollEvents[0].payload.index), 1)
+
+  const second = await callTool(env, 'period_roll', {}, pm.agent)
+  assert.equal(second.period.index, 2)
+  assert.equal(second.previous.current, first.period.current)
+  // 概览里的 period 跟随 period_roll，而不是"当前月"
+  const overview = env.deps.project.overview(env.db, env.root)
+  assert.equal(overview.project.period, second.period.current)
+  assert.equal(overview.project.periodIndex, 2)
+})
+
+test('v5 进度：只认 verified，done 单列一档，archived/cut 不进分母', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const mk = (key) => store.createSlice(env.db, { key, title: key })
+  const a = mk('a'), b = mk('b'), c = mk('c'), d = mk('d')
+  // a 验收；b done 未验收；c 进行中；d 裁剪
+  store.updateSliceStatus(env.db, { id: a.id, status: 'review' })
+  await callTool(env, 'slice_verify', { sliceId: a.id, verifiedBy: '老李' }, pm.agent)
+  store.updateSliceStatus(env.db, { id: b.id, status: 'done' })
+  store.updateSliceStatus(env.db, { id: c.id, status: 'in_progress' })
+  store.updateSliceStatus(env.db, { id: d.id, status: 'cut' })
+  const progress = env.deps.project.overview(env.db, env.root).progress
+  assert.equal(progress.total, 3, '分母 = verified + inFlight + blocked + notStarted + doneUnverified')
+  assert.equal(progress.verified, 1)
+  assert.equal(progress.doneUnverified, 1, 'done 未验收必须单列，不能算进已验收')
+  assert.equal(progress.abandoned, 1)
+  assert.equal(progress.percent, 33, '1/3 → 33%')
+})
+
+test('v5 进度：空项目 percent=0 且不崩', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const progress = env.deps.project.overview(env.db, env.root).progress
+  assert.equal(progress.total, 0)
+  assert.equal(progress.percent, 0)
+})
+
+
+
+// ---------------------------------------------------------------------------
+// v5 B3：阶段可交付类型（deliverableTypes）真的生效
+// ---------------------------------------------------------------------------
+
+test('v5 B3：S1 阶段只允许写 prd，写 report 被拒且不带 pending 副作用', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  // 必须先有阶段行：checkDeliverableType 的语义是「能判定才判定」，
+  // 没有 active 阶段时不做类型约束（旧库/headless 的宽松路径，与门禁阶段守卫一致）。
+  projectWithStages(env)
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 默认模板 S1 的 deliverableTypes 是 ['prd']；此时 active 阶段就是 S1
+  const ok = await callTool(env, 'doc_write', {
+    mode: 'create', type: 'prd', title: '退款 PRD', content: '# 退款\n',
+  }, task.agent)
+  assert.equal(ok.doc.type, 'prd')
+  await assertToolError(callTool(env, 'doc_write', {
+    mode: 'create', type: 'report', title: '不该写的报告', content: '# x\n',
+  }, task.agent), 'STAGE_DELIVERABLE_NOT_ALLOWED')
+  // 被拒后没有留下文档
+  const docs = deps_listDocs(env)
+  assert.equal(docs.filter((d) => d.type === 'report').length, 0)
+})
+
+test('v5 B3：给已有文档追加新版本不受类型约束（否则正常返工被卡死）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const created = await callTool(env, 'doc_write', {
+    mode: 'create', type: 'prd', title: '退款 PRD', content: '# v1\n',
+  }, task.agent)
+  const v2 = await callTool(env, 'doc_write', {
+    docId: created.doc.id, content: '# v2\n',
+  }, task.agent)
+  assert.equal(v2.doc.currentVersion, 2)
+})
+
+test('v5 B3：阶段没声明 deliverableTypes 时不约束（能判定才判定）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 把 project.json 的阶段模板改成没有 deliverableTypes 的形态
+  const original = env.registry.projectJson
+  env.registry.projectJson = () => ({ stageTemplate: [{ key: 'S1', name: '产品', gate: 'G1' }] })
+  t.after(() => { env.registry.projectJson = original })
+  const written = await callTool(env, 'doc_write', {
+    mode: 'create', type: 'report', title: '任意类型', content: '# x\n',
+  }, task.agent)
+  assert.equal(written.doc.type, 'report', '阶段没声明类型时应放行（不伪造约束）')
+})
+
+function deps_listDocs(env) {
+  return env.db.db.prepare('SELECT * FROM documents WHERE project_id = ?').all(env.db.projectId)
+}
+

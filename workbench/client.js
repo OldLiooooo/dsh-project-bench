@@ -252,6 +252,14 @@ window.__ModuleLoader__.load({
 .wb-doc-block[data-type=hr]{height:1px;background:var(--dsw-alias-border-l1)}
 .wb-doc-filter{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .wb-decision{display:flex;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);padding:12px 14px}
+.wb-progress{display:flex;flex-direction:column;gap:8px;margin:4px 0 0}
+.wb-progress-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.wb-progress-label{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary)}
+.wb-progress-value{font:var(--dsw-font-m-18);color:var(--dsw-alias-label-primary)}
+.wb-progress-sub{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}
+.wb-progress-bar{height:8px;border-radius:var(--dsw-radius-full,999px);background:var(--dsw-alias-bg-layer-2);overflow:hidden}
+.wb-progress-fill{display:block;height:100%;background:var(--dsw-alias-state-business-primary);transition:width .2s ease}
+.wb-progress-warn{margin:0;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-state-warn-secondary)}
 .wb-decision[data-irreversible=true]{border-color:var(--dsw-alias-state-warn-secondary)}
 .wb-decision-title{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;font:var(--dsw-font-s-strong-14)}
 .wb-decision-question{margin:0;color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xs-13);white-space:pre-wrap;overflow-wrap:anywhere}
@@ -393,6 +401,14 @@ window.__ModuleLoader__.load({
       'overview.counts.sessions': '会话',
       'overview.counts.documents': '文档',
       'overview.counts.pendingDecisions': '待决策',
+      'overview.progress': '进度（已验证）',
+      'overview.progressDetail': '{verified} / {total} 已验收',
+      'overview.progressDoneUnverified': '{count} 项已交付但未独立验收（不计入进度）',
+      'overview.counts.verified': '已验收',
+      'overview.counts.inFlight': '进行中',
+      'overview.counts.blocked': '阻塞',
+      'overview.counts.doneUnverified': '已交付未验收',
+
       'overview.stages': '阶段与门禁',
       'overview.pm': '项目办公室（PM）',
       'overview.pmNone': '尚未创建 PM 会话',
@@ -719,6 +735,14 @@ window.__ModuleLoader__.load({
       'overview.counts.sessions': 'Sessions',
       'overview.counts.documents': 'Documents',
       'overview.counts.pendingDecisions': 'Pending decisions',
+      'overview.progress': 'Progress (verified)',
+      'overview.progressDetail': '{verified} / {total} verified',
+      'overview.progressDoneUnverified': '{count} delivered but not independently verified — not counted in progress',
+      'overview.counts.verified': 'Verified',
+      'overview.counts.inFlight': 'In flight',
+      'overview.counts.blocked': 'Blocked',
+      'overview.counts.doneUnverified': 'Done (unverified)',
+
       'overview.stages': 'Stages and gates',
       'overview.pm': 'Project office (PM)',
       'overview.pmNone': 'No PM session yet',
@@ -1123,6 +1147,9 @@ window.__ModuleLoader__.load({
         truncated: value.truncated === true,
         degraded: value.degraded === true,
         counts: value.counts && typeof value.counts === 'object' ? value.counts : null,
+        // v5：进度（唯一口径 = verified）。必须显式透传，否则归一化时会被丢掉，
+        // 面板就永远只能显示计数卡（这正是「后端算了但前端看不见」的坑）。
+        progress: value.progress && typeof value.progress === 'object' ? value.progress : null,
       }
     }
 
@@ -1364,6 +1391,29 @@ window.__ModuleLoader__.load({
         pendingDecisions: number(declared.pendingDecisions, data.pendingDecisions.length),
         decisions: number(declared.decisions, counted.decisions.length),
         evidence: number(declared.evidence, counted.evidence.length),
+      }
+    }
+
+    /**
+     * v5：进度（唯一口径 = verified）。后端在 project.progress / snapshot.progress 里给，
+     * 这里只做「形状兜底」——不在前端重算，否则前后端会给出两个进度数字。
+     * 缺失时返回 undefined，前端回退到原来的计数卡（旧快照/旧客户端）。纯函数，可单测。
+     */
+    function projectProgress(snapshot) {
+      const data = normalizeSnapshot(snapshot)
+      const raw = data.progress || (data.project && data.project.progress)
+      if (!raw || typeof raw !== 'object') return undefined
+      const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0)
+      return {
+        total: num(raw.total),
+        verified: num(raw.verified),
+        inFlight: num(raw.inFlight),
+        blocked: num(raw.blocked),
+        notStarted: num(raw.notStarted),
+        doneUnverified: num(raw.doneUnverified),
+        abandoned: num(raw.abandoned),
+        percent: Math.max(0, Math.min(100, num(raw.percent))),
+        basis: raw.basis || 'verified-only',
       }
     }
 
@@ -1937,7 +1987,7 @@ window.__ModuleLoader__.load({
       projectDisplayName, findPMSession, isPMSessionRow, sessionPreset, normalizeSnapshot,
       normalizeProjects, eventCategory, findStage, currentStage, stageLabel, toneOfStatus,
       statusLabel, eventLabel, docTypeLabel, healthLabel, collectTreeData, stageBySliceMap,
-      sliceTitleMap, sessionTitleMap, flattenTree, defaultExpandedKeys, projectCounts,
+      sliceTitleMap, sessionTitleMap, flattenTree, defaultExpandedKeys, projectCounts, projectProgress,
       activeSlices, currentSliceOf, latestEvent, mergeEvents, timelineRoleOptions, filterTimeline,
       eventDetail, eventActor, formatTime, formatFullTime, truncate, decisionOptions,
       isRecommendedOption, sortSessions, timelineStageOptions, errorInfo, errorText, errorDetailLines,
@@ -3203,6 +3253,7 @@ window.__ModuleLoader__.load({
         onEnterPM, enterBusy, enterError, onOpenDocument, onSelectRow, pendingCount,
       } = props
       const counts = projectCounts(norm)
+      const progress = projectProgress(norm)
       const pm = findPMSession(norm)
       const slices = maps && maps.sliceTitles ? maps.sliceTitles : new Map()
       const recent = norm.recentTimeline.slice().sort((left, right) => Number(right.seq || 0) - Number(left.seq || 0)).slice(0, 8)
@@ -3220,7 +3271,28 @@ window.__ModuleLoader__.load({
             onClick: onEnterPM, disabled: enterBusy,
           }, enterBusy ? h(Spinner) : null, t('panel.header.enterPM')),
         },
-          h('div', { className: 'wb-counts' },
+          // v5：进度只报 verified 口径（设计 §6.2）。done 单独一行标出来，避免"看起来做完了"。
+          progress ? h('div', { className: 'wb-progress' },
+            h('div', { className: 'wb-progress-head' },
+              h('span', { className: 'wb-progress-label' }, t('overview.progress')),
+              h('strong', { className: 'wb-progress-value' }, String(progress.percent) + '%'),
+              h('span', { className: 'wb-progress-sub' }, t('overview.progressDetail', {
+                verified: String(progress.verified), total: String(progress.total),
+              })),
+            ),
+            h('div', { className: 'wb-progress-bar', role: 'progressbar', 'aria-valuenow': progress.percent, 'aria-valuemin': 0, 'aria-valuemax': 100 },
+              h('span', { className: 'wb-progress-fill', style: { width: Math.max(0, Math.min(100, progress.percent)) + '%' } }),
+            ),
+            progress.doneUnverified > 0
+              ? h('p', { className: 'wb-progress-warn' }, t('overview.progressDoneUnverified', { count: String(progress.doneUnverified) }))
+              : null,
+            h('div', { className: 'wb-counts' },
+              h(CountCard, { value: progress.verified, label: t('overview.counts.verified') }),
+              h(CountCard, { value: progress.inFlight, label: t('overview.counts.inFlight') }),
+              h(CountCard, { value: progress.blocked, label: t('overview.counts.blocked') }),
+              h(CountCard, { value: progress.doneUnverified, label: t('overview.counts.doneUnverified') }),
+            ),
+          ) : h('div', { className: 'wb-counts' },
             h(CountCard, { value: counts.slices, label: t('overview.counts.slices') }),
             h(CountCard, { value: counts.tasks, label: t('overview.counts.tasks') }),
             h(CountCard, { value: counts.sessions, label: t('overview.counts.sessions') }),

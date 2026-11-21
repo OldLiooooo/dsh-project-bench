@@ -58,7 +58,7 @@ export const projectStatus = {
   name: 'project_status',
   description: '查看当前项目状态：项目名、阶段与门禁、在办切片、待决策、活跃任务会话、你的角色身份。任何项目会话可调用，用于每步确认全局状态。',
   parameters: params({}, []),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (_args, _exec, actor, deps) {
     const overview = deps.project.overview(actor.db, actor.root)
     const decisions = deps.store.listDecisions(actor.db, { status: 'pending' }).slice(0, 10).map(function (decision) {
@@ -89,6 +89,8 @@ export const projectStatus = {
     return {
       project: overview.project,
       counts: overview.counts,
+      // v5：进度只报 verified 口径。PM 用它回答「到哪了」，而不是数 done。
+      progress: overview.progress,
       stages: overview.stages ? overview.stages.map(function (stage) { return { key: stage.key, name: stage.name, status: stage.status, gate: stage.gate } }) : [],
       pendingDecisions: decisions,
       activeSessions: sessions,
@@ -105,7 +107,7 @@ export const projectBrief = {
     sliceId: S('切片 id（可选；任务会话默认本切片）'),
     sliceKey: S('切片 key（可选，PM 用）'),
   }, []),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     let sliceId = args.sliceId
     if (!sliceId && args.sliceKey) sliceId = resolveSlice(deps, actor, { sliceKey: args.sliceKey }).id
@@ -132,7 +134,7 @@ export const projectRecall = {
     hint: S('检索方向提示：doc/decision/event（可选）'),
     limit: N('最大命中数，默认 5，最多 10'),
   }, ['query']),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     const query = typeof args.query === 'string' ? args.query.trim() : ''
     if (!query) throw fail('INVALID', 'query 必须是非空字符串')
@@ -192,7 +194,7 @@ export const docList = {
     type: S('文档类型：prd|ux|adr|design|spec|report|handoff|retro（可选）'),
     status: S('文档状态：draft|review|approved|frozen（可选）'),
   }, []),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     const filter = {}
     if (args.sliceId) filter.sliceId = args.sliceId
@@ -212,7 +214,7 @@ export const docGet = {
     logicalKey: S('文档逻辑键，如 prd/payment-refund（与 id 二选一）'),
     version: N('版本号（可选，默认最新版）'),
   }, []),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     let doc
     if (args.id) doc = deps.docs.getDocument(actor.db, args.id)
@@ -241,7 +243,7 @@ export const taskList = {
     sliceId: S('切片 id（可选）'),
     status: S('任务状态（可选）'),
   }, []),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     const filter = {}
     if (args.sliceId) filter.sliceId = args.sliceId
@@ -256,7 +258,7 @@ export const sliceList = {
   name: 'slice_list',
   description: '列出项目切片（id/key/标题/类型/状态/owner/交接摘要）。可按 status 过滤。',
   parameters: params({ status: S('切片状态（可选）') }, []),
-  actors: ['pm', 'task'],
+  actors: ['pm', 'task', 'qa'],
   execute: async function (args, _exec, actor, deps) {
     const slices = deps.store.listSlices(actor.db, { status: args.status || undefined }).map(minimalSlice)
     return { count: slices.length, slices: slices }
