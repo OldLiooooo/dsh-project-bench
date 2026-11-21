@@ -62,3 +62,17 @@ node workbench/tests/e2e/instance-http.mjs --strict
 | `WORKBENCH_E2E_KEEP=1` | 保留临时项目目录（默认删除） |
 | `DSH_DESKTOP_EXE` / `DSH_DESKTOP_CLI` | 覆盖 DSH 可执行文件/CLI 路径（默认本机安装路径） |
 | `DSH_HOME` | dev-install 默认目标 home；dev-instance 默认用 `<workspace>/.devhome` |
+
+> ⚠️ **跑了单元测试就一定要设 `DSH_HOME`，且必须写成 Windows 路径。**
+> 单元测试会创建真实项目库；权威源在 `$DSH_HOME/storages/`，而真实 `~/.dsh` 对会话沙箱是 EPERM
+> （这本身反证单写成立），不设就会整批 `EPERM: mkdir` 失败。
+>
+> ```bash
+> # ✅ 对
+> export DSH_HOME='C:/Users/you/repo/.artifacts/dshhome'
+> # ❌ 错：MSYS 的 $(pwd) 给出 /c/Users/...，node 会拼成 C:\c\Users\... → EPERM
+> export DSH_HOME="$(pwd)/.dshhome"
+> ```
+>
+> `governance-e2e` 例外：它的 ②c 要探「真实用户目录是否 EPERM」，已改成只在 DSH_HOME
+> 指向**工作区外**时才认作真实目录，否则回落到 `homedir()/.dsh`（详见交付审计 §5 #6）。

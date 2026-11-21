@@ -152,6 +152,15 @@ in the workspace's `.project/`; delete it for a complete cleanup (back up `proje
 
 ### 🧪 Testing
 
+Unit tests create a real project database, and the authoritative store lives under `$DSH_HOME/storages/`
+(the real `~/.dsh` is EPERM for the agent sandbox — which is exactly the single-writer guarantee). So they
+need an in-workspace `DSH_HOME`, written as a **Windows path**:
+
+```bash
+export DSH_HOME='C:/Users/you/repo/.artifacts/dshhome'   # ✅
+export DSH_HOME="$(pwd)/.dshhome"                        # ❌ MSYS pwd → /c/... → C:\c\... → EPERM
+```
+
 | Suite | Command | Result |
 |---|---|---|
 | Unit (99 cases across 6 files) | `node --test --test-isolation=none workbench/tests/unit/` | 99 (98 pass / 1 skip) |
@@ -323,6 +332,14 @@ key 从 credentials refs 读取，绝不硬编码。
 > 设计文档以中文为主；插件 UI 同时提供 `en` 与 `zh` 两套 locale。
 
 ### 🧪 测试
+
+单元测试会创建真实项目库，而权威源在 `$DSH_HOME/storages/`（真实 `~/.dsh` 对会话沙箱是 EPERM ——
+这本身反证单写成立），所以必须把 `DSH_HOME` 指到工作区内，且要写成 **Windows 路径**：
+
+```bash
+export DSH_HOME='C:/Users/you/repo/.artifacts/dshhome'   # ✅
+export DSH_HOME="$(pwd)/.dshhome"                        # ❌ MSYS pwd 给 /c/... → C:\c\... → EPERM
+```
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
