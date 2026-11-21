@@ -52,6 +52,8 @@ export function mapSlice(row) {
     title: row.title,
     parentId: row.parent_id ?? undefined,
     status: row.status,
+    /** 写作用域是否已显式声明（未声明时收工只能做「无基线」校验，见 host/scope.js）。 */
+    scopeDeclared: Boolean(row.scope_declared),
     ownerRole: row.owner_role ?? undefined,
     ownerSession: row.owner_session ?? undefined,
     currentHandoff: row.current_handoff ?? undefined,
@@ -95,6 +97,12 @@ export function mapSession(row) {
     endedAt: row.ended_at ?? undefined,
     handoffId: row.handoff_id ?? undefined,
     context: parseJson(row.context_json, {}),
+    /** 派活第几次（同切片同角色重复派活时区分新旧，重试/对账用）。 */
+    attempt: Number(row.attempt === undefined || row.attempt === null ? 1 : row.attempt),
+    /** 失败原因（v4）：会话失败必须能回答「为什么」，而不是只留一个 status='failed'。 */
+    failureCode: row.failure_code ?? undefined,
+    failureDetail: row.failure_detail ?? undefined,
+    failureAt: row.failure_at ?? undefined,
   }
 }
 
@@ -110,6 +118,8 @@ export function mapDecision(row) {
     options: parseJson(row.options_json, []),
     recommended: row.recommended ?? undefined,
     consequences: row.consequences ?? undefined,
+    /** 人选的选项 value（A/B/C/D 或自定义）；无选项的门禁决策为 undefined。 */
+    answer: row.answer ?? undefined,
     status: row.status,
     irreversible: Boolean(row.irreversible),
     deadline: row.deadline ?? undefined,
@@ -367,6 +377,19 @@ export function getSession(db, sessionId) {
   return mapSession(row)
 }
 
+/**
+ * 派活次数：同 (切片, 角色) 的历史会话数 + 1。
+ * 为什么需要它：失败重试会产生第二条同名/同角色会话，若账上只有「一条 active」，
+ * 对账就无法回答「这是第几次尝试、上一次为什么失败」，人也没法判断该不该再信它。
+ */
+function nextAttempt(db, projectId, sliceId, role, kind) {
+  if (kind !== 'task' || !sliceId || !role) return 1
+  const row = db.db
+    .prepare('SELECT COALESCE(MAX(attempt), 0) AS n FROM sessions WHERE project_id = ? AND slice_id = ? AND role = ? AND kind = ?')
+    .get(projectId, sliceId, role, kind)
+  return Number(row && row.n ? row.n : 0) + 1
+}
+
 export function createSession(db, input = {}) {
   const projectId = requireProjectId(db)
   const kind = input.kind === undefined ? 'task' : requiredText(input.kind, 'kind')
@@ -398,10 +421,13 @@ export function createSession(db, input = {}) {
     }
     const id = newId('session')
     const at = nowIso()
+    const attempt = Number.isFinite(Number(input.attempt)) && Number(input.attempt) > 0
+      ? Number(input.attempt)
+      : nextAttempt(db, projectId, sliceId, role, kind)
     try {
-      db.db.prepare('INSERT INTO sessions(id, project_id, name, kind, role, slice_id, dsh_session_id, parent_session_id, provider, model, reasoning_effort, status, started_at, context_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      db.db.prepare('INSERT INTO sessions(id, project_id, name, kind, role, slice_id, dsh_session_id, parent_session_id, provider, model, reasoning_effort, status, started_at, context_json, attempt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(id, projectId, name, kind, role ?? null, sliceId, dshSessionId, input.parentSessionId ?? null,
-          input.provider ?? null, input.model ?? null, input.reasoningEffort ?? null, 'active', at, jsonText(asJsonField(input.context, {})))
+          input.provider ?? null, input.model ?? null, input.reasoningEffort ?? null, 'active', at, jsonText(asJsonField(input.context, {})), attempt)
     } catch (error) {
       throw mapSessionConstraint(error)
     }
@@ -420,6 +446,7 @@ export function createSession(db, input = {}) {
         dshSessionId: dshSessionId || undefined,
         provider: input.provider || undefined,
         model: input.model || undefined,
+        attempt: attempt,
       },
     })
     return getSession(db, id)
@@ -443,16 +470,43 @@ export function listSessions(db, options = {}) {
   return db.db.prepare(sql).all(...params).map(mapSession)
 }
 
+/**
+ * 结束会话（含失败）。
+ *
+ * v4 起「失败」是一个**带原因的终态**：
+ *   - status='failed'/'interrupted' 必须给 failureCode（缺省 FAILED_UNSPECIFIED / INTERRUPTED）；
+ *   - failure_code / failure_detail / failure_at 落列，可被 project_status、重启对账与面板查询；
+ *   - 已结束的会话再次 endSession 是幂等的，**但不得洗掉原有的失败原因**
+ *     （原实现遇到非 active 直接 return，会把 failed 会话的失败原因永久留在调用方日志里）。
+ * @returns {object} 结束后的会话行
+ */
 export function endSession(db, input = {}) {
   const id = requiredText(input.id || input.sessionId, 'id')
   const status = input.status === undefined ? 'done' : requiredText(input.status, 'status')
   if (!SESSION_END_STATUSES.includes(status)) throw fail('INVALID', 'session end status 必须是 ' + SESSION_END_STATUSES.join('/'))
+  const failed = status === 'failed' || status === 'interrupted'
+  const failureCode = input.failureCode === undefined || input.failureCode === null || input.failureCode === ''
+    ? (failed ? (status === 'failed' ? 'FAILED_UNSPECIFIED' : 'INTERRUPTED') : undefined)
+    : String(input.failureCode)
+  const failureDetail = input.failureDetail === undefined || input.failureDetail === null
+    ? (failed ? String(input.failureDetailHint || '') || undefined : undefined)
+    : String(input.failureDetail)
   return db.tx(() => {
     const before = getSession(db, id)
     if (!before) throw fail('NOT_FOUND', 'session not found: ' + id)
-    if (before.status !== 'active') return before
+    if (before.status !== 'active') {
+      // 幂等返回，但**补齐缺失的失败原因**（旧代码路径可能只写了 status=failed）。
+      if (failed && !before.failureCode && failureCode) {
+        db.db.prepare('UPDATE sessions SET failure_code = ?, failure_detail = ?, failure_at = ? WHERE id = ?')
+          .run(failureCode, failureDetail ?? null, nowIso(), id)
+        return getSession(db, id)
+      }
+      return before
+    }
     const handoffId = input.handoffId ?? before.handoffId ?? null
-    db.db.prepare('UPDATE sessions SET status = ?, ended_at = ?, handoff_id = ? WHERE id = ?').run(status, nowIso(), handoffId, id)
+    const at = nowIso()
+    db.db.prepare('UPDATE sessions SET status = ?, ended_at = ?, handoff_id = ?, failure_code = ?, failure_detail = ?, failure_at = ? WHERE id = ?')
+      .run(status, at, handoffId, failed ? failureCode : null, failed ? (failureDetail ?? null) : null, failed ? at : null, id)
     db.appendEvent({
       kind: 'session/end',
       sliceId: before.sliceId,
@@ -460,7 +514,14 @@ export function endSession(db, input = {}) {
       subjectId: id,
       actorSession: before.dshSessionId,
       role: before.role,
-      payload: { name: before.name, status: status, handoffId: handoffId || undefined },
+      payload: {
+        name: before.name,
+        status: status,
+        handoffId: handoffId || undefined,
+        attempt: before.attempt || undefined,
+        failureCode: failed ? failureCode : undefined,
+        failureDetail: failed && failureDetail ? failureDetail.slice(0, 500) : undefined,
+      },
     })
     return getSession(db, id)
   })
@@ -536,6 +597,24 @@ export function createDecision(db, input = {}) {
   })
 }
 
+/**
+ * One option's machine value. Mirrors the client's `decisionOptions` fallback chain so the
+ * value the user clicks is exactly the value stored in decisions.answer:
+ * 字符串选项 → A/B/C…；对象选项 → value ?? id ?? A/B/C…。
+ * @param option - raw option from options_json.
+ * @param index - zero-based position (used for the letter fallback).
+ * @returns the stored value.
+ */
+export function optionValueOf(option, index) {
+  const letter = String.fromCharCode(65 + (index % 26))
+  if (option && typeof option === 'object') {
+    if (option.value !== undefined) return String(option.value)
+    if (option.id !== undefined) return String(option.id)
+    return letter
+  }
+  return letter
+}
+
 export function resolveDecision(db, input = {}) {
   const id = requiredText(input.id || input.decisionId, 'id')
   const status = requiredText(input.status, 'status')
@@ -548,9 +627,25 @@ export function resolveDecision(db, input = {}) {
     if (before.irreversible && (!input.decidedBy || !confirmedInput)) {
       throw fail('INVALID', '不可逆决策必须由人确认：decidedBy 非空且 confirmed=true', { decisionId: id })
     }
+    // answer = 人选的那一项。有选项的决策必须点名选了哪个，否则「批准」在语义上无法落地
+    // （批准了「哪一条」是决策的核心信息，不能只记 approved/rejected）。
+    const options = Array.isArray(before.options) ? before.options : []
+    const rawAnswer = input.answer === undefined || input.answer === null ? '' : String(input.answer).trim()
+    let answer = null
+    if (rawAnswer !== '') {
+      const allowed = new Set(options.map((option, index) => optionValueOf(option, index)))
+      if (!allowed.has(rawAnswer)) {
+        throw fail('INVALID', '选项不存在：' + rawAnswer + '（可选：' + Array.from(allowed).join('/') + '）', { decisionId: id, answer: rawAnswer })
+      }
+      answer = rawAnswer
+    }
+    // 注意分层：这里**不**强制 answer。
+    // 「多选一时必须点名选了哪一条」的强制放在人操作的那一层（决策卡按钮在没选时 disabled），
+    // 因为那才是歧义真正产生的地方；API 层保持向后兼容，不误伤既有调用方与历史数据。
+    // 但只要给了 answer，就必须是真实存在的选项（上面已校验）。
     const at = nowIso()
-    db.db.prepare('UPDATE decisions SET status = ?, decided_by = ?, rationale = ?, decided_at = ? WHERE id = ?')
-      .run(status, input.decidedBy ?? null, input.rationale ?? null, at, id)
+    db.db.prepare('UPDATE decisions SET status = ?, decided_by = ?, rationale = ?, answer = ?, decided_at = ? WHERE id = ?')
+      .run(status, input.decidedBy ?? null, input.rationale ?? null, answer, at, id)
     db.appendEvent({
       kind: 'decision/resolve',
       sliceId: before.sliceId,
@@ -561,6 +656,7 @@ export function resolveDecision(db, input = {}) {
         status: status,
         decidedBy: input.decidedBy ?? undefined,
         rationale: input.rationale ?? undefined,
+        answer: answer ?? undefined,
         confirmed: confirmedInput,
         irreversible: before.irreversible,
         gate: before.gate || undefined,
@@ -596,6 +692,15 @@ export function addEvidence(db, input = {}) {
   const sliceId = input.sliceId ?? null
   if (sliceId) requireSlice(db, sliceId)
   if (input.taskId) requireTask(db, input.taskId)
+  // 一个事实一行：同 (project, kind, uri) 只允许一条。DB 层有唯一索引兜底，
+  // 这里先查一次是为了给出可读原因与既有 id（而不是让调用方看 SQLite 约束串）。
+  const uri = input.uri === undefined || input.uri === null ? null : String(input.uri)
+  if (uri !== null) {
+    const existing = db.db.prepare('SELECT id FROM evidence WHERE project_id = ? AND kind = ? AND uri = ?').get(projectId, kind, uri)
+    if (existing) {
+      throw fail('DUPLICATE_EVIDENCE', '同一证据已登记（kind=' + kind + '，uri=' + uri + '）：' + existing.id + '。补充新结论请换 uri 或追加新版本。', { evidenceId: existing.id, uri: uri, kind: kind })
+    }
+  }
   return db.tx(() => {
     const id = newId('evidence')
     const at = nowIso()
@@ -643,6 +748,12 @@ export function addArtifact(db, input = {}) {
   if (sliceId) requireSlice(db, sliceId)
   const bytes = input.bytes === undefined || input.bytes === null ? null : Number(input.bytes)
   if (bytes !== null && (!Number.isFinite(bytes) || bytes < 0)) throw fail('INVALID', 'bytes 必须是非负数')
+  // 一个事实一行：同 (project, kind, path) 只允许一条。理由同 addEvidence。
+  const projectIdForDup = requireProjectId(db)
+  const existingArtifact = db.db.prepare('SELECT id FROM artifacts WHERE project_id = ? AND kind = ? AND path = ?').get(projectIdForDup, kind, path)
+  if (existingArtifact) {
+    throw fail('DUPLICATE_ARTIFACT', '同一产物已登记（kind=' + kind + '，path=' + path + '）：' + existingArtifact.id + '。内容变更请更新该行或用 artifact_add 的新 kind。', { artifactId: existingArtifact.id, path: path, kind: kind })
+  }
   return db.tx(() => {
     const id = newId('artifact')
     const at = nowIso()

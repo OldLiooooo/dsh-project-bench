@@ -2,35 +2,57 @@
 // 安全：每个 handler 第一行先过 ctx.connection.requestRejection(req)（Host/Origin 围栏 + 登录 cookie），
 // 未认证一律 401/403；POST 只接受人的面板操作（初始化/决策拍板/PM 绑定），agent 没有写入口。
 import { projectError } from './registry.js'
-import { initProject, resolveDecisionAction, bindPmSession } from './project.js'
+import { initProject, resolveDecisionAction, bindPmSession, replayExports } from './project.js'
+import { resolveIdentity, listIdentities } from './identity.js'
 import { buildSnapshot, sliceDetail, docPreview, timelinePage } from './snapshot.js'
 
 export const API_PREFIX = '/project-workbench/api'
 export const HEARTBEAT_MS = 25000
 const MAX_BODY_BYTES = 64 * 1024
 
-const GET_ROUTES = new Set(['/', '/projects', '/snapshot', '/slice', '/doc', '/timeline', '/events'])
-const POST_ROUTES = new Set(['/init', '/decision', '/pm'])
+const GET_ROUTES = new Set(['/', '/projects', '/snapshot', '/slice', '/doc', '/timeline', '/events', '/identities'])
+const POST_ROUTES = new Set(['/init', '/decision', '/pm', '/exports/replay'])
 
 const STATUS_BY_CODE = {
   INVALID: 400,
+  ANSWER_REQUIRED: 400,
   INVALID_ROOT: 400,
   MISSING_WORKSPACE: 400,
   MISSING_ROOT: 400,
+  POLICY_INVALID: 400,
   UNAUTHORIZED: 401,
   NOT_REGISTERED_WORKSPACE: 403,
   FORBIDDEN: 403,
+  NOT_PROJECT_SESSION: 403,
+  PERMISSION_DENIED: 403,
   NOT_FOUND: 404,
   CONFLICT: 409,
   CONFIRM_REQUIRED: 409,
   NOT_INITIALIZED: 409,
   DOC_FROZEN: 409,
   LEASE_HELD: 409,
+  LEASE_FENCED: 409,
   DUPLICATE_ACTIVE_SESSION: 409,
+  DUPLICATE_SLICE: 409,
+  DUPLICATE_DOCUMENT: 409,
+  DUPLICATE_EVIDENCE: 409,
+  DUPLICATE_ARTIFACT: 409,
+  OUT_OF_SCOPE_CHANGES: 409,
+  GATE_STAGE_INVALID: 409,
+  GATE_PRECHECK_FAILED: 409,
+  STALE_PRECHECK: 409,
+  STALE_APPROVAL: 409,
+  STALE_GATE_STAGE: 409,
+  STALE_STAGE: 409,
+  NO_EVIDENCE: 409,
+  EXPORT_FAILED: 502,
+  SPAWN_FAILED: 502,
+  DELIVERY_FAILED: 502,
   PAYLOAD_TOO_LARGE: 413,
   PROJECT_DB_ERROR: 500,
   DATA_LAYER_UNAVAILABLE: 503,
   WORKSPACE_REGISTRY_UNAVAILABLE: 503,
+  UNAVAILABLE: 503,
 }
 
 function statusOf(error) {
@@ -47,13 +69,98 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
+/**
+ * 错误详情（v4）：旧实现只回 {code, message}，把「真正能修问题的东西」全丢了 ——
+ * 门禁失败看不到 issues 原文、租约冲突看不到持有者、栅栏失效看不到 epoch 差、
+ * 作用域越界看不到文件清单。于是面板只能显示一句看不懂的话，人只能去翻日志。
+ *
+ * 现在统一补三块：
+ *   - details：领域错误自带的结构化明细（白名单字段，避免把内部对象/大数组丢给浏览器）；
+ *   - issues：门禁/判据的逐条问题（原样，含 code/path/message/check）；
+ *   - hints：把「下一步该做什么」变成机器可读的动作建议（replay_exports / resubmit_gate / …）。
+ * 同时限制体积：宁可截断，也不让一个 5MB 的 issues 把响应撑爆。
+ */
+const MAX_ISSUES = 40
+const MAX_DETAILS_CHARS = 6000
+const DETAIL_KEYS = [
+  'sliceId', 'sessionId', 'dshSessionId', 'docId', 'decisionId', 'approvalId', 'taskId',
+  'holder', 'expiresAt', 'epoch', 'presented', 'gate', 'stage', 'currentStage', 'requestedStage',
+  'submittedVersion', 'currentVersion', 'submittedHash', 'currentHash', 'files', 'batchId',
+  'attempt', 'failureCode', 'taskRolledBack', 'path', 'kind', 'uri', 'evidenceId', 'artifactId',
+]
+
+function trimIssues(issues) {
+  if (!Array.isArray(issues)) return undefined
+  return issues.slice(0, MAX_ISSUES).map(function (issue) {
+    if (!issue || typeof issue !== 'object') return { message: String(issue) }
+    const out = {}
+    for (const key of ['code', 'path', 'message', 'check']) {
+      if (issue[key] !== undefined && issue[key] !== null) out[key] = issue[key]
+    }
+    return out
+  })
+}
+
+function pickDetails(error) {
+  const details = error && error.details
+  if (!details || typeof details !== 'object') return undefined
+  const out = {}
+  for (const key of DETAIL_KEYS) {
+    if (details[key] !== undefined && details[key] !== null) out[key] = details[key]
+  }
+  if (Object.keys(out).length === 0) return undefined
+  try {
+    const text = JSON.stringify(out)
+    if (text.length > MAX_DETAILS_CHARS) {
+      return { truncated: true, chars: text.length, preview: text.slice(0, 400) + '…' }
+    }
+    return out
+  } catch (serializeError) {
+    return undefined
+  }
+}
+
+/** 错误码 → 机器可读的下一步建议（面板可直接渲染成按钮）。 */
+const HINTS_BY_CODE = {
+  STALE_PRECHECK: [{ action: 'resubmit_gate', hint: '判据在提交后变了：重新 gate_submit 后再批准' }],
+  STALE_APPROVAL: [{ action: 'resubmit_gate', hint: '提交内容已过期：重新 gate_submit 后再批准' }],
+  STALE_GATE_STAGE: [{ action: 'resubmit_gate', hint: '门禁与当前阶段不再匹配：按当前阶段重新提交' }],
+  STALE_STAGE: [{ action: 'inspect_stages', hint: '阶段表不合法（active 阶段数≠1）：先修复阶段表' }],
+  GATE_PRECHECK_FAILED: [{ action: 'fix_issues', hint: '先修判据问题，再重新 gate_submit' }],
+  LEASE_HELD: [{ action: 'wait_or_takeover', hint: '切片由其它会话持有：等其收工，或等租约过期后重新派活' }],
+  LEASE_FENCED: [{ action: 'release_and_respawn', hint: '写作用域已换代（被抢占）：本会话不能再写，请释放并重新派活' }],
+  OUT_OF_SCOPE_CHANGES: [{ action: 'review_diff', hint: '存在片外/跨切片改动：由 PM 决定接受（declare 策略）或回滚' }],
+  SPAWN_FAILED: [{ action: 'retry_spawn', hint: '派活失败：任务已回滚为 pending，可直接重试或换切片' }],
+  EXPORT_FAILED: [{ action: 'replay_exports', hint: '文件没落地：阶段/数据未回滚，用「重新生成导出」补偿' }],
+  CONFIRM_REQUIRED: [{ action: 'confirm', hint: '不可逆操作：需要二次确认（confirmed=true）' }],
+  NO_EVIDENCE: [{ action: 'add_evidence', hint: '先 evidence_add 记录可复核证据' }],
+  DOC_FROZEN: [{ action: 'new_version_flow', hint: '文档已冻结：返工需新决策并新开文档' }],
+  NOT_INITIALIZED: [{ action: 'init_project', hint: '先在面板初始化项目' }],
+}
+
+function hintsOf(error) {
+  const code = error && error.code
+  const mapped = HINTS_BY_CODE[code]
+  if (mapped) return mapped
+  // Epoch 冲突统一给「重新提交」的建议；其它错误不猜。
+  return undefined
+}
+
 function sendError(res, error) {
-  sendJson(res, statusOf(error), {
+  const payload = {
     error: {
       code: error?.code || 'INTERNAL',
       message: error?.message || 'internal error',
     },
-  })
+  }
+  const issues = trimIssues(error && error.issues)
+  if (issues && issues.length > 0) payload.error.issues = issues
+  const details = pickDetails(error)
+  if (details) payload.error.details = details
+  const hints = hintsOf(error)
+  if (hints) payload.error.hints = hints
+  if (error && error.plan) payload.error.plan = error.plan
+  sendJson(res, statusOf(error), payload)
 }
 
 function sendMethodNotAllowed(res, allow) {
@@ -139,6 +246,31 @@ function referenceOf(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
+/**
+ * 宿主注入的登录主体（如果宿主提供了）。
+ *
+ * 这里**不猜**：只有宿主明确给出 subject 时才算 host 身份。
+ * 拿不到就返回 undefined，交给 resolveIdentity 退到 declared/local 并如实标注来源。
+ * 假装「反正是本人」，正是原实现 decidedBy='user' 的病根。
+ */
+function hostIdentity(ctx, req) {
+  try {
+    const connection = ctx && ctx.connection
+    if (connection && typeof connection.identity === 'function') {
+      const value = connection.identity(req)
+      if (value && typeof value === 'object' && typeof value.subject === 'string' && value.subject.trim()) {
+        return { subject: value.subject, displayName: value.displayName, source: 'host', clientHint: req.headers?.['user-agent'] }
+      }
+    }
+  } catch (error) { /* 宿主未提供身份能力：退到 declared/local */ }
+  const header = req && req.headers ? (req.headers['x-workbench-identity'] || req.headers['x-remote-user']) : undefined
+  if (typeof header === 'string' && header.trim()) {
+    // 直接来自请求头的身份只能算 declared（客户端可伪造），但至少**记下出处**。
+    return { subject: header.trim(), displayName: header.trim(), source: 'declared', clientHint: req.headers?.['user-agent'] }
+  }
+  return undefined
+}
+
 function queryReference(query) {
   return referenceOf(query.get('root')) ?? referenceOf(query.get('workspaceId'))
 }
@@ -222,6 +354,11 @@ export function createApi(ctx, registry, bus) {
     const version = url.searchParams.get('version')
     const preview = docPreview(db, url.searchParams.get('id'), { version: version === null ? undefined : version })
     sendJson(res, 200, { ...preview, root: workspace.root, workspaceId: workspace.workspaceId })
+  }
+
+  function handleIdentities(url, res) {
+    const { workspace, db } = requireProject(url.searchParams)
+    sendJson(res, 200, { identities: listIdentities(db), root: workspace.root, workspaceId: workspace.workspaceId })
   }
 
   function handleTimeline(url, res) {
@@ -313,6 +450,7 @@ export function createApi(ctx, registry, bus) {
       case '/projects': handleProjects(res); return
       case '/snapshot': handleSnapshot(url, res); return
       case '/slice': handleSlice(url, res); return
+      case '/identities': handleIdentities(url, res); return
       case '/doc': handleDoc(url, res); return
       case '/timeline': handleTimeline(url, res); return
       case '/events': handleEvents(req, res, url); return
@@ -342,14 +480,43 @@ export function createApi(ctx, registry, bus) {
         const db = registry.open(workspace.root)
         if (!db) throw projectError('NOT_INITIALIZED', 'project is not initialized: ' + workspace.root, 409)
         const json = registry.projectJson(workspace.root)
-        const result = resolveDecisionAction(ctx, db, {
+        // 身份（v4）：优先宿主注入的主体，其次面板显式 actingAs，最后 decidedBy 字符串/local。
+        // 来源会随审批一起落库（approval_signers.source），不再是一个没有出处的 'user'。
+        const identity = resolveIdentity({
+          identity: hostIdentity(ctx, req),
+          decidedBy: body.decidedBy,
+          actingAs: body.actingAs,
+          clientHint: req.headers?.['user-agent'],
+        })
+        // 批准门禁会先复跑判据（async），因此这里必须 await。
+        const result = await resolveDecisionAction(ctx, db, {
           id: body.id,
           status: body.status,
           rationale: body.rationale,
+          answer: body.answer === undefined || body.answer === null ? undefined : String(body.answer),
           confirmed: body.confirmed === true,
-        }, { root: workspace.root, exportMap: json?.exportMap })
+          identity: { subject: identity.subject, displayName: identity.displayName, source: identity.source },
+          clientHint: identity.clientHint,
+        }, { root: workspace.root, exportMap: json?.exportMap, registry, identityObj: identity })
         emitChange(workspace.root, result.revision)
-        sendJson(res, 200, { ok: true, root: workspace.root, workspaceId: workspace.workspaceId, decision: result.decision, actions: result.actions, wake: result.wake, revision: result.revision })
+        sendJson(res, 200, {
+          ok: true, root: workspace.root, workspaceId: workspace.workspaceId,
+          decision: result.decision, actions: result.actions, exportResult: result.exportResult,
+          separation: result.separation, wake: result.wake, revision: result.revision,
+        })
+        return
+      }
+      case '/exports/replay': {
+        // 导出补偿（v4）：把 pending/failed 的导出意图重新落地。
+        // 与「重新批准」解耦：阶段推进是人签的字，文件是可再生的派生物。
+        const db = registry.open(workspace.root)
+        if (!db) throw projectError('NOT_INITIALIZED', 'project is not initialized: ' + workspace.root, 409)
+        const result = replayExports(db, {
+          root: workspace.root,
+          batchId: typeof body.batchId === 'string' && body.batchId.trim() ? body.batchId.trim() : undefined,
+        })
+        emitChange(workspace.root, result.revision)
+        sendJson(res, 200, { ok: true, root: workspace.root, workspaceId: workspace.workspaceId, ...result })
         return
       }
       case '/pm': {

@@ -7,6 +7,8 @@ import * as importerApi from '../import.js'
 import * as projectApi from '../project.js'
 import * as projectDefaults from '../project-defaults.js'
 import * as indexerApi from '../indexer.js'
+import * as checkersApi from '../checkers.js'
+import * as scopeApi from '../scope.js'
 import { registerToolDefinitions, createToolSpecs, toolCatalog } from './register.js'
 
 /** 组装工具依赖（测试可传入替身）。 */
@@ -23,6 +25,8 @@ export function createToolDeps(ctx, registry, bus) {
     project: projectApi,
     projectDefaults: projectDefaults,
     indexer: indexerApi,
+    checkers: checkersApi,
+    scope: scopeApi,
   }
 }
 

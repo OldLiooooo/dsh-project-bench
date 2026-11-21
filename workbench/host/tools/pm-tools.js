@@ -1,9 +1,11 @@
 // PM（项目办公室）工具（T4）：切片/任务/会话/决策/门禁/导出导入。仅 project-office 会话可见。
 import { randomUUID } from 'node:crypto'
 import { fail } from '../db.js'
-import { newId, nowIso, estimateTokens } from '../util.js'
+import { newId, nowIso, estimateTokens, sha256 } from '../util.js'
 import { TASK_ROLES, ROLE_HELP, isKnownRole, taskSessionName } from '../roles.js'
 import { resolveSlice, spawnTaskSession } from '../orchestration.js'
+import { validateGateTarget } from '../project.js'
+import { runProjectCheckers, summarizeCheckRun } from '../checkers.js'
 import {
   params, S, N, B, A, STRING_ARRAY, requireProjectActor, requireText, optionalText,
   notifyWrite, currentStageOf, exportMapOf, rootOf,
@@ -92,6 +94,43 @@ export const sliceUpdate = {
     })
     notifyWrite(deps, actor)
     return { slice: updated }
+  },
+}
+
+/**
+ * slice_scope：声明/查看/清空切片的写作用域（PM）。
+ *
+ * 为什么必须有这个工具：没有作用域声明，收工的「片外零改动」校验就永远只能返回
+ * verifiable=false（无法区分片内片外）。声明入口缺失会让整套校验形同虚设——
+ * 这也是「约束要么在 DB，要么在领域函数」的必然结果：可判定的前提是**有人能声明边界**。
+ */
+export const sliceScope = {
+  name: 'slice_scope',
+  description: '声明切片的写作用域（路径模式，如 src/refund/**）。声明后收工时会用真实 git diff 校验改动是否越界；不声明则无法判定（收工会如实标注未校验）。action=list 查看，declare 追加模式，clear 清空。',
+  parameters: params({
+    action: S('list | declare | clear（默认 list）'),
+    sliceId: S('切片 id（与 sliceKey 二选一）'),
+    sliceKey: S('切片 key（与 sliceId 二选一）'),
+    patterns: STRING_ARRAY('路径模式数组，如 ["src/refund/**","tests/refund/**"]（declare 必填）'),
+  }, []),
+  actors: ['pm'],
+  execute: async function (args, _exec, actor, deps) {
+    const action = optionalText(args.action) || 'list'
+    if (action !== 'list' && action !== 'declare' && action !== 'clear') throw fail('INVALID', 'action 必须是 list / declare / clear')
+    const slice = resolveSlice(deps, actor, { sliceId: optionalText(args.sliceId), sliceKey: optionalText(args.sliceKey) })
+    if (action === 'list') {
+      return { slice: { id: slice.id, key: slice.key }, scopes: deps.scope.listSliceScopes(actor.db, slice.id), declared: slice.scopeDeclared }
+    }
+    if (action === 'declare') {
+      const patterns = Array.isArray(args.patterns) ? args.patterns : []
+      if (patterns.length === 0) throw fail('INVALID', 'declare 需要 patterns（至少 1 个路径模式）')
+      const scopes = deps.scope.declareSliceScope(actor.db, { sliceId: slice.id, patterns, addedBy: actor.dshSessionId })
+      notifyWrite(deps, actor)
+      return { slice: { id: slice.id, key: slice.key }, scopes, declared: true }
+    }
+    const cleared = deps.scope.clearSliceScope(actor.db, { sliceId: slice.id, addedBy: actor.dshSessionId })
+    notifyWrite(deps, actor)
+    return { slice: { id: slice.id, key: slice.key }, cleared: cleared.removed, declared: false }
   },
 }
 
@@ -267,16 +306,49 @@ export const gateSubmit = {
   execute: async function (args, _exec, actor, deps) {
     const gate = requireText(args.gate, 'gate')
     const summary = requireText(args.summary, 'summary')
-    const stage = optionalText(args.stage) || (currentStageOf(deps, actor.db) || {}).key
+    const requestedStage = optionalText(args.stage)
+    // ① 阶段守卫：只能提交给当前 active 阶段，且 gate 必须与该阶段匹配。
+    //    否则会出现「S1 还 active 时批准了 S4 门禁」→ 两个 active 阶段（P1 缺陷）。
+    const gateTarget = validateGateTarget(actor.db, { gate: gate, stage: requestedStage })
+    if (gateTarget.issues.length > 0) {
+      throw fail('GATE_STAGE_INVALID', '门禁提交被拒：' + gateTarget.issues.map(function (issue) { return issue.message }).join('；'), {
+        issues: gateTarget.issues,
+      })
+    }
+    const stage = gateTarget.stage
     const docIds = Array.isArray(args.docIds) ? args.docIds.map(String) : []
     const evidenceIds = Array.isArray(args.evidenceIds) ? args.evidenceIds.map(String) : []
     const docs = []
+    // ② 文档快照：提交时把「版本 + 内容 hash」钉住，批准时据此冻结，不再现场重查。
+    const docVersions = []
     for (const docId of docIds) {
       const doc = deps.docs.getDocument(actor.db, docId)
       if (!doc) throw fail('NOT_FOUND', '门禁文档不存在：' + docId)
-      docs.push({ id: doc.id, type: doc.type, title: doc.title, version: doc.currentVersion })
+      const version = Number(doc.currentVersion || 0)
+      const versionRow = version > 0 ? deps.docs.getDocVersion(actor.db, doc.id, version) : undefined
+      if (version <= 0) throw fail('INVALID', '门禁文档还没有任何版本，不能提交：' + docId)
+      docVersions.push({ docId: doc.id, version: version, hash: versionRow ? versionRow.contentHash : null })
+      docs.push({ id: doc.id, type: doc.type, title: doc.title, version: version, hash: versionRow ? versionRow.contentHash : null })
     }
     if (evidenceIds.length === 0) throw fail('NO_EVIDENCE', '门禁提交至少需要 1 条证据（evidenceIds）')
+    // ③ 前置机检：门禁判据必须由机器给出，而不是「人点了批准」。
+    //    通过 → 落一条 evidence（原文 + hash）；失败 → 直接拒绝提交，把 issues 原文返回给调用方。
+    const machineCheck = await runProjectCheckers(rootOf(actor), { registry: deps.registry })
+    const checkSummary = summarizeCheckRun(machineCheck)
+    if (!machineCheck.ok) {
+      throw fail('GATE_PRECHECK_FAILED', '门禁前置机检未通过，拒绝提交：' + checkSummary, {
+        issues: machineCheck.issues.slice(0, 20),
+        checks: machineCheck.checks,
+      })
+    }
+    const checkEvidence = machineCheck.skipped ? undefined : deps.store.addEvidence(actor.db, {
+      kind: 'check',
+      uri: 'gate/' + gate + '/' + new Date().toISOString(),
+      command: 'gate_submit:runProjectCheckers',
+      contentHash: sha256(JSON.stringify(machineCheck.checks)),
+      resultSummary: checkSummary,
+      createdBy: actor.dshSessionId,
+    })
     const evidence = []
     for (const evidenceId of evidenceIds) {
       const item = deps.store.getEvidence(actor.db, evidenceId)
@@ -297,21 +369,60 @@ export const gateSubmit = {
       createdBy: actor.dshSessionId,
     })
     let approvalId
+    let superseded = []
+    let approvalEpoch = 1
     actor.db.tx(function () {
+      // 重提交：同门禁的旧 pending 审批必须先作废（保留行），否则「批准哪一条」未定义。
+      superseded = deps.project.supersedePendingApprovals(actor.db, decision, { reason: 'resubmitted', supersededBy: decision.id })
+      const previous = actor.db.db
+        .prepare("SELECT MAX(epoch) AS e FROM approvals WHERE project_id = ? AND gate IS ?")
+        .get(actor.db.projectId, gate)
+      approvalEpoch = Number(previous && previous.e !== null && previous.e !== undefined ? previous.e : 0) + 1
       approvalId = newId('appr')
-      const snapshot = JSON.stringify({ decisionId: decision.id, gate: gate, stage: stage, summary: summary, docIds: docIds, evidenceIds: evidenceIds, submittedBy: actor.dshSessionId })
-      actor.db.db.prepare('INSERT INTO approvals(id, project_id, stage, gate, decision_id, status, evidence_ids_json, snapshot_json, approved_by, approved_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(approvalId, actor.db.projectId, stage || null, gate, decision.id, 'pending', JSON.stringify(evidenceIds), snapshot, null, null)
+      const allEvidenceIds = checkEvidence ? evidenceIds.concat([checkEvidence.id]) : evidenceIds
+      const snapshot = JSON.stringify({
+        decisionId: decision.id, gate: gate, stage: stage, summary: summary,
+        docIds: docIds, docVersions: docVersions, evidenceIds: allEvidenceIds,
+        checks: machineCheck.checks,
+        // v4：判据的「信任级别」也是快照的一部分 —— 批准时要能回答「当时是隔离跑的还是一进程内跑的」。
+        checkTrust: machineCheck.trust,
+        submittedBy: actor.dshSessionId, submittedAt: new Date().toISOString(), epoch: approvalEpoch,
+      })
+      actor.db.db.prepare('INSERT INTO approvals(id, project_id, stage, gate, decision_id, status, evidence_ids_json, snapshot_json, approved_by, approved_at, epoch) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+        .run(approvalId, actor.db.projectId, stage || null, gate, decision.id, 'pending', JSON.stringify(allEvidenceIds), snapshot, null, null, approvalEpoch)
       actor.db.appendEvent({
         kind: 'gate/submit',
         subjectType: 'gate',
         subjectId: gate,
         sliceId: optionalText(args.sliceId),
-        payload: { decisionId: decision.id, approvalId: approvalId, gate: gate, stage: stage, docIds: docIds, evidenceIds: evidenceIds, summary: summary },
+        payload: {
+          decisionId: decision.id, approvalId: approvalId, gate: gate, stage: stage,
+          docIds: docIds, evidenceIds: evidenceIds, summary: summary,
+          epoch: approvalEpoch, superseded, trust: machineCheck.trust ? machineCheck.trust.mode : undefined,
+        },
       })
     })
     notifyWrite(deps, actor)
-    return { decision: decision, approvalId: approvalId, gate: gate, stage: stage, documents: docs, evidenceCount: evidence.length, note: '等待用户批准；批准后自动冻结/导出/推进阶段。' }
+    return {
+      decision: decision,
+      approvalId: approvalId,
+      gate: gate,
+      stage: stage,
+      documents: docs,
+      evidenceCount: evidence.length + (checkEvidence ? 1 : 0),
+      approvalEpoch: approvalEpoch,
+      supersededApprovals: superseded,
+      machineCheck: {
+        ok: machineCheck.ok, skipped: machineCheck.skipped, reason: machineCheck.reason,
+        durationMs: machineCheck.durationMs, checks: machineCheck.checks,
+        // 信任级别必须回传：门禁判据是「机器给的」还是「一进程内跑的自述脚本」，是两件事。
+        trust: machineCheck.trust,
+      },
+      note: machineCheck.skipped
+        ? '未发现可用判据（root/tools/engineering/*.mjs），本次门禁只有人工判据；其余同前。'
+        : '机检已通过并存证；等待用户批准，批准后自动冻结/导出/推进阶段。'
+          + (machineCheck.trust && machineCheck.trust.degraded ? '⚠ 判据未隔离执行（' + machineCheck.trust.mode + '），仅适用于可信判据。' : ''),
+    }
   },
 }
 
@@ -337,13 +448,26 @@ export const exportProject = {
     }
     const docs = deps.docs.listDocuments(actor.db, optionalText(args.sliceId) ? { sliceId: args.sliceId } : {})
     const exported = []
+    const failed = []
+    // 整批共用一个 batch：部分失败时可以用同一个 batchId 一次性补偿。
+    const batchId = newId('batch')
     for (const doc of docs) {
       if (!doc.currentVersion) continue
-      const out = deps.exporter.exportDocument(actor.db, { docId: doc.id, version: doc.currentVersion, root: root, exportMap: exportMap })
-      exported.push({ docId: doc.id, type: doc.type, title: doc.title, version: out.version, path: out.path, hash: out.hash })
+      const out = deps.exporter.exportDocument(actor.db, { docId: doc.id, version: doc.currentVersion, root: root, exportMap: exportMap, batchId })
+      const item = { docId: doc.id, type: doc.type, title: doc.title, version: out.version, path: out.path, hash: out.hash, written: out.written !== false }
+      exported.push(item)
+      if (out.written === false) failed.push({ docId: doc.id, relativePath: out.relativePath, error: out.error })
     }
     notifyWrite(deps, actor)
-    return { kind: 'docs', root: root, count: exported.length, documents: exported, note: 'docs/ 是导出快照，不要回读；项目事实源在 DB。' }
+    return {
+      kind: 'docs', root: root, count: exported.length, documents: exported,
+      batchId,
+      failed: failed.length,
+      failures: failed,
+      note: failed.length > 0
+        ? '有 ' + failed.length + ' 篇导出失败：意图已记录在 outbox，可补偿重放（不成功的文件不在 docs/ 里）。'
+        : 'docs/ 是导出快照，不要回读；项目事实源在 DB。',
+    }
   },
 }
 
@@ -393,10 +517,22 @@ export const docExport = {
     const version = args.version === undefined || args.version === null ? doc.currentVersion : Number(args.version)
     const out = deps.exporter.exportDocument(actor.db, { docId: docId, version: version, root: root, exportMap: exportMapOf(deps, actor) })
     notifyWrite(deps, actor)
-    return { docId: docId, version: out.version, path: out.path, relativePath: out.relativePath, hash: out.hash }
+    // 写盘失败不能被当成「导出成功」：DB 侧意图已提交（outbox 有 failed 行，可补偿），
+    // 但调用方必须立刻知道文件没落地，否则它会以为 docs/ 里已经有内容。
+    if (out.written === false) {
+      throw fail('EXPORT_FAILED', '文档导出失败：' + String(out.error || 'unknown') + '（导出意图已记录，可用 export_replay/exports/replay 补偿）', {
+        docId: docId,
+        version: out.version,
+        relativePath: out.relativePath,
+        batchId: out.batchId,
+        outboxId: out.outboxId,
+        path: out.path,
+      })
+    }
+    return { docId: docId, version: out.version, path: out.path, relativePath: out.relativePath, hash: out.hash, batchId: out.batchId }
   },
 }
 
 export function createPmTools(_ctx, _deps) {
-  return [projectInit, sliceCreate, sliceUpdate, taskCreate, sessionSpawnTask, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport]
+  return [projectInit, sliceCreate, sliceUpdate, sliceScope, taskCreate, sessionSpawnTask, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport]
 }

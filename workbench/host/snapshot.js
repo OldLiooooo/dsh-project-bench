@@ -56,11 +56,18 @@ function groupCounts(db, table) {
 // 基础查询
 // ---------------------------------------------------------------------------
 
-export function listStages(db) {
-  return db.db
-    .prepare('SELECT * FROM stages WHERE project_id = ? ORDER BY position ASC')
+/**
+ * 阶段行。默认只返回**活阶段机**（status != 'retired'）：
+ * 换过模板的项目里旧阶段会被 retire 但仍留在表里（保留历史事件），
+ * 如果把它们混进 active 判定，currentStage/advanceStage 会选错阶段（实测会推进到已退役的 S1）。
+ * 需要完整历史时显式传 { includeRetired: true }。
+ */
+export function listStages(db, options = {}) {
+  const rows = db.db
+    .prepare('SELECT * FROM stages WHERE project_id = ? ORDER BY position ASC, rowid ASC')
     .all(db.projectId)
-    .map(mapStageRow)
+  const filtered = options && options.includeRetired === true ? rows : rows.filter((row) => row.status !== 'retired')
+  return filtered.map(mapStageRow)
 }
 
 export function currentStage(db) {

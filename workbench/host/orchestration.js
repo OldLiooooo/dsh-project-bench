@@ -2,7 +2,7 @@
 // 只依赖 node: 内置模块与 host/* 领域模块；所有写操作都经 store/docs/leases 的领域函数。
 import { randomUUID } from 'node:crypto'
 import { fail } from './db.js'
-import { findProjectRoot } from './util.js'
+import { findProjectRoot, estimateTokens, truncateToTokens } from './util.js'
 import { compileContext } from './context.js'
 import { roleCardText, taskSessionName } from './roles.js'
 
@@ -185,7 +185,15 @@ export function resolveSlice(deps, actor, input = {}) {
   return slice
 }
 
-/** 构造任务会话开场提示：角色卡 + 2k 切片简报 + 验收 + PM 交代。 */
+/**
+ * 构造任务会话开场提示：角色卡 + 2k 切片简报 + 验收 + PM 交代。
+ *
+ * v4：把「开场简报」纳入同一个预算（原来只有 compileContext 受预算约束，
+ * PM 交代与验收是**无上限**拼进去的——PM 一次写长 brief 就能把注入撑到数倍）。
+ * 预算顺序：角色卡(L1) 与切片简报(L2) 由 compileContext 裁剪；brief/acceptance 共享剩余额度，
+ * 超出时先裁 brief（PM 可再发消息补充），再裁验收（验收是硬信息，最后才动）。
+ * 返回值 added 字段如实给出：used（总注入）/ briefBudget / truncated，供 PM 与测试核对。
+ */
 export function buildTaskAssignment(input) {
   const { db, slice, task, role, action, brief, acceptance, projectName, stageLabel, budget } = input
   const name = taskSessionName(role, slice.key, action)
@@ -198,44 +206,94 @@ export function buildTaskAssignment(input) {
     includeL2: true,
     budget,
   })
-  const lines = []
-  lines.push('你是项目工作台的任务会话「' + name + '」（角色：' + role + '）。')
-  lines.push('项目：' + (projectName || '(未命名)') + (stageLabel ? '｜阶段：' + stageLabel : ''))
-  lines.push('你只对 PM（项目办公室）负责；用户只与 PM 对话，不要直接向用户提问。')
-  lines.push('')
-  lines.push('## 角色卡')
-  lines.push(roleCardText(role))
-  lines.push('')
-  lines.push('## 切片简报')
-  lines.push(compiled.parts.l2 || '(无)')
-  if (task) {
+  const hardLimit = compiled.budget && compiled.budget.hardLimit ? compiled.budget.hardLimit : 2000
+  const acceptanceRaw = task
+    ? (acceptance || (task.acceptance && Object.keys(task.acceptance).length > 0 ? JSON.stringify(task.acceptance) : ''))
+    : (acceptance || '')
+  /**
+   * 组装函数：把可裁的两段（PM 交代 / 验收）按给定额度拼成完整提示。
+   * 先按全额拼一次量出真实占用，再按**实际超出量**逐段回收 —— 这比「先估骨架」可靠：
+   * 骨架估算漏掉一个 '## 本任务' 标题就会让总量突破硬上限（实测 2020 > 2000）。
+   */
+  const assemble = (briefText, acceptanceText) => {
+    const lines = []
+    lines.push('你是项目工作台的任务会话「' + name + '」（角色：' + role + '）。')
+    lines.push('项目：' + (projectName || '(未命名)') + (stageLabel ? '｜阶段：' + stageLabel : ''))
+    lines.push('你只对 PM（项目办公室）负责；用户只与 PM 对话，不要直接向用户提问。')
     lines.push('')
-    lines.push('## 本任务')
-    lines.push('任务：' + task.title + '（' + task.status + '）')
-    const acceptanceText = acceptance || (task.acceptance && Object.keys(task.acceptance).length > 0 ? JSON.stringify(task.acceptance) : '')
-    if (acceptanceText) lines.push('验收：' + acceptanceText)
-  } else if (acceptance) {
+    lines.push('## 角色卡')
+    lines.push(roleCardText(role))
     lines.push('')
-    lines.push('## 本任务验收')
-    lines.push(acceptance)
+    lines.push('## 切片简报')
+    lines.push(compiled.parts.l2 || '(无)')
+    if (task) {
+      lines.push('')
+      lines.push('## 本任务')
+      lines.push('任务：' + task.title + '（' + task.status + '）')
+      if (acceptanceText) lines.push('验收：' + acceptanceText)
+    } else if (acceptanceText) {
+      lines.push('')
+      lines.push('## 本任务验收')
+      lines.push(acceptanceText)
+    }
+    if (briefText) {
+      lines.push('')
+      lines.push('## PM 交代')
+      lines.push(briefText)
+    }
+    lines.push('')
+    lines.push('## 纪律')
+    lines.push('1) 只写本切片写作用域内的代码/文档；片外零改动（收工会用真实 git diff 校验）。')
+    lines.push('2) 需要人拍板的问题用 session_task_report 回 PM，不要直接问用户。')
+    lines.push("3) 收工前用 evidence_add 记录证据（≥1 条），doc_write 写交接，最后 session_finish_task(status:'done', noOutOfScopeChanges:true)。")
+    lines.push('4) 按需 project_recall/doc_get 查询；不要把整篇文档塞回上下文。')
+    return lines.join('\n')
   }
-  if (brief) {
-    lines.push('')
-    lines.push('## PM 交代')
-    lines.push(brief)
+  let briefText = brief ? String(brief) : ''
+  let acceptanceText = acceptanceRaw ? String(acceptanceRaw) : ''
+  let text = assemble(briefText, acceptanceText)
+  let used = estimateTokens(text)
+  if (used > hardLimit) {
+    // ① 先裁 PM 交代（PM 可以再发一条消息补充，信息不会丢）
+    const overBrief = used - hardLimit
+    if (briefText) {
+      briefText = truncateToTokens(briefText, Math.max(0, estimateTokens(briefText) - overBrief))
+      text = assemble(briefText, acceptanceText)
+      used = estimateTokens(text)
+    }
+    // ② 还不够就裁验收（验收是硬信息，最后才动）
+    if (used > hardLimit && acceptanceText) {
+      const overAcceptance = used - hardLimit
+      acceptanceText = truncateToTokens(acceptanceText, Math.max(0, estimateTokens(acceptanceText) - overAcceptance))
+      text = assemble(briefText, acceptanceText)
+      used = estimateTokens(text)
+    }
+    // ③ 兜底：连骨架加 L1/L2 都超预算时（极端长角色卡/简报），整体硬截断并标注
+    if (used > hardLimit) {
+      text = truncateToTokens(text, hardLimit)
+      used = estimateTokens(text)
+    }
   }
-  lines.push('')
-  lines.push('## 纪律')
-  lines.push('1) 只写本切片写作用域内的代码/文档；片外零改动。')
-  lines.push('2) 需要人拍板的问题用 session_task_report 回 PM，不要直接问用户。')
-  lines.push("3) 收工前用 evidence_add 记录证据（≥1 条），doc_write 写交接，最后 session_finish_task(status:'done', noOutOfScopeChanges:true)。")
-  lines.push('4) 按需 project_recall/doc_get 查询；不要把整篇文档塞回上下文。')
-  return { name, text: lines.join('\n'), used: compiled.used + (brief ? brief.length : 0), degraded: compiled.degraded }
+  const truncated = (brief ? briefText !== String(brief) : false) || (acceptanceRaw ? acceptanceText !== String(acceptanceRaw) : false)
+  return {
+    name,
+    text: text,
+    used: used,
+    hardLimit: hardLimit,
+    degraded: compiled.degraded || truncated,
+    truncated: { brief: Boolean(brief && briefText !== String(brief)), acceptance: Boolean(acceptanceRaw && acceptanceText !== String(acceptanceRaw)) },
+    budget: compiled.budget,
+  }
 }
 
 /**
  * PM 派任务：写 sessions 行 + 租约 + 事件，然后 startActivation 拉起 project-task 会话。
- * 失败回滚：结束会话行、释放租约，再抛出 SPAWN_FAILED。
+ *
+ * v4 失败回滚（原来的三条缺口逐个补上）：
+ *   1. 会话失败不记原因 → endSession 现在带 failureCode/failureDetail（SPAWN_FAILED 时落库）；
+ *   2. 派活失败不回滚 task → 任务会被挂在一个已失败的会话上（幽灵指派）。现在显式回滚：
+ *      task.status 回到 pending、assignee_session 清空，并写一条 task/status 事件（有据可查）；
+ *   3. 失败路径零测试 → tests/unit/failure.test.mjs 覆盖 spawn 失败、租约冲突、栅栏抢占三条路径。
  */
 export async function spawnTaskSession(ctx, deps, input) {
   const { actor, role, slice, task, action, brief, acceptance, provider, model, reasoningEffort, signal, parentAgent } = input
@@ -274,11 +332,36 @@ export async function spawnTaskSession(ctx, deps, input) {
       reason: 'task session spawn: ' + name,
     })
   } catch (error) {
-    try { deps.store.endSession(db, { id: session.id, status: 'failed' }) } catch (cleanupError) { /* 保留原始错误 */ }
+    try {
+      deps.store.endSession(db, {
+        id: session.id, status: 'failed',
+        failureCode: 'LEASE_ACQUIRE_FAILED',
+        failureDetail: String((error && error.message) || error).slice(0, 500),
+      })
+    } catch (cleanupError) { /* 保留原始错误 */ }
     throw error
   }
+  // 栅栏令牌落进会话上下文：之后所有写路径都会拿它与当前租约 epoch 比对（抢占后必然不符）。
+  const fenceEpoch = lease ? Number(lease.epoch) : undefined
+  if (fenceEpoch !== undefined) {
+    try {
+      deps.store.updateSession(db, { id: session.id, context: { ...session.context, taskId: task ? task.id : undefined, fenceEpoch } })
+      session.context = { ...session.context, fenceEpoch }
+    } catch (error) { /* 令牌写不进去时不阻断派活；写路径会退化为 holder 校验 */ }
+  }
+  let taskAdvanced = false
   if (task && typeof deps.store.updateTask === 'function') {
-    try { deps.store.updateTask(db, { id: task.id, status: 'in_progress', assigneeSession: session.id }) } catch (error) { /* 任务状态更新失败不阻断派活 */ }
+    try {
+      deps.store.updateTask(db, { id: task.id, status: 'in_progress', assigneeSession: session.id })
+      taskAdvanced = true
+    } catch (error) { /* 任务状态更新失败不阻断派活 */ }
+  }
+  /** 回滚：任务不留在已失败的会话上（幽灵指派）。 */
+  const rollbackTaskAssignment = () => {
+    if (!taskAdvanced || !task || typeof deps.store.updateTask !== 'function') return
+    try {
+      deps.store.updateTask(db, { id: task.id, status: 'pending', assigneeSession: null })
+    } catch (error) { /* 回滚失败不覆盖原始错误，但会在事件里缺失归属说明 */ }
   }
   const project = db.project() || {}
   const stage = deps.project && typeof deps.project.currentStage === 'function' ? deps.project.currentStage(db) : undefined
@@ -309,16 +392,31 @@ export async function spawnTaskSession(ctx, deps, input) {
       signal,
     })
   } catch (error) {
-    try { deps.store.endSession(db, { id: session.id, status: 'failed' }) } catch (cleanupError) { /* 保留原始错误 */ }
+    const detail = String(error && error.message ? error.message : error)
+    // 顺序很重要：先释放租约（释放校验 holder，会话还是 active 才不会被当成人已不在），
+    // 再结束会话并写入失败原因，最后回滚任务指派。任一步失败都不覆盖原始错误。
     try { deps.leases.releaseLease(db, { sliceId: slice.id, sessionId: session.id }) } catch (cleanupError) { /* 保留原始错误 */ }
-    const wrapped = fail('SPAWN_FAILED', '任务会话启动失败：' + String(error && error.message ? error.message : error), {
+    try {
+      deps.store.endSession(db, {
+        id: session.id,
+        status: 'failed',
+        failureCode: 'SPAWN_FAILED',
+        failureDetail: detail.slice(0, 500),
+      })
+    } catch (cleanupError) { /* 保留原始错误 */ }
+    rollbackTaskAssignment()
+    const wrapped = fail('SPAWN_FAILED', '任务会话启动失败：' + detail, {
       sessionId: session.id,
       dshSessionId,
+      attempt: session.attempt,
       cause: String(error && error.code ? error.code : 'unknown'),
+      // 失败原因同时带回给 PM：它要能立刻决定「重试 vs 换切片 vs 报告用户」。
+      failureCode: 'SPAWN_FAILED',
+      taskRolledBack: taskAdvanced,
     })
     throw wrapped
   }
-  return { session, dshSessionId, lease, assignment, activation, name }
+  return { session, dshSessionId, lease, assignment, activation, name, fenceEpoch }
 }
 
 /** 找当前 active PM 会话行。 */
@@ -367,9 +465,19 @@ export async function notifyPm(ctx, deps, db, input = {}) {
 /**
  * 重启对账：DB 中 active 任务会话但进程内没有 live agent → 标 interrupted + 释放其租约。
  * PM 会话保留 active（用户重开继续）。
+ *
+ * v4 变化（原实现对账「对了但没记原因」）：
+ *   - 每个被中断的会话都落 failureCode='HOST_RESTART' + failureDetail（含 dshSessionId/attempt），
+ *     之前只写 status='interrupted'，人无法回答「它为什么没了」；
+ *   - 顺带发现**孤儿租约**（持租会话已经不是 active）也一并清理，否则新会话永远拿不到该切片；
+ *   - 顺带发现**幽灵任务**（task.status=in_progress 但 assignee 会话已不在 active）回滚成 pending；
+ *   - 结果里分别计数，便于面板/交接文档如实报告「这次重启修好了什么」。
  */
 export function reconcileStaleSessions(ctx, registry, deps) {
-  const result = { projects: 0, checked: 0, interrupted: 0, leasesReleased: 0 }
+  const result = {
+    projects: 0, checked: 0, interrupted: 0, leasesReleased: 0,
+    orphanLeases: 0, phantomTasks: 0, errors: [],
+  }
   let projects = []
   try { projects = registry.listProjects() } catch (error) { return result }
   const live = new Set()
@@ -388,9 +496,16 @@ export function reconcileStaleSessions(ctx, registry, deps) {
       result.checked += 1
       if (row.dshSessionId && live.has(row.dshSessionId)) continue
       try {
-        deps.store.endSession(db, { id: row.id, status: 'interrupted' })
+        deps.store.endSession(db, {
+          id: row.id,
+          status: 'interrupted',
+          failureCode: 'HOST_RESTART',
+          failureDetail: '重启对账：DB 中 active 但进程内无 live agent（dshSessionId=' + String(row.dshSessionId || '-') + '，attempt=' + String(row.attempt || 1) + '）',
+        })
         result.interrupted += 1
-      } catch (error) { /* 单个会话失败不影响其它 */ }
+      } catch (error) {
+        result.errors.push({ sessionId: row.id, step: 'endSession', message: String((error && error.message) || error) })
+      }
       if (row.sliceId) {
         try {
           const lease = deps.leases.getLease(db, row.sliceId)
@@ -398,7 +513,36 @@ export function reconcileStaleSessions(ctx, registry, deps) {
             deps.leases.releaseLease(db, { sliceId: row.sliceId, sessionId: row.id })
             result.leasesReleased += 1
           }
-        } catch (error) { /* 租约释放失败忽略 */ }
+        } catch (error) { /* 租约释放失败忽略（下一轮对账还会看到它） */ }
+      }
+    }
+    // 孤儿租约：持租会话已经结束 → 租约永远挡着新会话。清掉并记数。
+    let leaseRows = []
+    try { leaseRows = db.db.prepare('SELECT slice_id, session_id FROM leases WHERE project_id = ?').all(db.projectId) } catch (error) { leaseRows = [] }
+    for (const lease of leaseRows) {
+      let holder
+      try { holder = deps.store.getSession(db, lease.session_id) } catch (error) { holder = undefined }
+      if (holder && holder.status === 'active') continue
+      try {
+        deps.leases.releaseLease(db, { sliceId: lease.slice_id, sessionId: lease.session_id })
+        result.orphanLeases += 1
+      } catch (error) {
+        result.errors.push({ sliceId: lease.slice_id, step: 'releaseOrphanLease', message: String((error && error.message) || error) })
+      }
+    }
+    // 幽灵任务：in_progress 但指派会话不 active（派活失败/会话中断但任务没回滚）。
+    let taskRows = []
+    try { taskRows = db.db.prepare("SELECT id, assignee_session FROM tasks WHERE project_id = ? AND status = 'in_progress'").all(db.projectId) } catch (error) { taskRows = [] }
+    for (const task of taskRows) {
+      if (!task.assignee_session) continue
+      let assignee
+      try { assignee = deps.store.getSession(db, task.assignee_session) } catch (error) { assignee = undefined }
+      if (assignee && assignee.status === 'active') continue
+      try {
+        deps.store.updateTask(db, { id: task.id, status: 'pending', assigneeSession: null })
+        result.phantomTasks += 1
+      } catch (error) {
+        result.errors.push({ taskId: task.id, step: 'rollbackPhantomTask', message: String((error && error.message) || error) })
       }
     }
   }

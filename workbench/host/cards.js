@@ -63,13 +63,14 @@ function createKind(ctx, registry) {
       }
       let result
       try {
-        result = project.resolveDecisionAction(ctx, actor.db, {
+        result = await project.resolveDecisionAction(ctx, actor.db, {
           id: decisionId,
           status: verb === 'approve' ? 'approved' : 'rejected',
           confirmed: confirmed,
           rationale: payload && typeof payload.rationale === 'string' ? payload.rationale : undefined,
+          answer: payload && payload.answer !== undefined && payload.answer !== null ? String(payload.answer) : undefined,
           decidedBy: 'user',
-        }, { root: actor.root })
+        }, { root: actor.root, registry: registry })
       } catch (error) {
         const code = error && error.code ? error.code : ''
         if (code === 'CONFIRM_REQUIRED') return unconfirmed('不可逆决策需要二次确认')

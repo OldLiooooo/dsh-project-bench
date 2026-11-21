@@ -3,6 +3,7 @@
 import { fail } from '../db.js'
 import { nowIso } from '../util.js'
 import { notifyPm, invalidateActorCache } from '../orchestration.js'
+import { validateFinish, scopePolicyOf } from '../scope.js'
 import {
   params, S, B, STRING_ARRAY, requireProjectActor, requireText, optionalText,
   requireSliceId, notifyWrite, currentStageOf, normalizeProjectPath,
@@ -198,13 +199,17 @@ function _ctxOf(deps, _exec) {
 /** session_finish_task：任务会话收工（校验 handoff + 证据≥1 + 片外零改动声明）。 */
 export const sessionFinishTask = {
   name: 'session_finish_task',
-  description: '任务会话收工。硬校验：handoff 正文非空、证据 ≥1 条（evidenceIds 或已记录）、必须声明片外零改动（noOutOfScopeChanges=true）。通过后写交接文档、结束会话、释放租约、通知 PM。',
+  description: '任务会话收工。硬校验：handoff 正文非空、证据 ≥1 条（evidenceIds 或已记录）、切片作用域校验（对真实 git diff，不再只认声明）、租约栅栏有效。通过后写交接文档、结束会话、释放租约、通知 PM。',
   parameters: params({
     status: S('done | failed（默认 done）'),
     handoff: S('交接正文：做了什么、怎么验证、遗留/风险、下一步'),
     evidenceIds: STRING_ARRAY('证据 id 列表（可选；不给则统计本切片已有证据）'),
     files: STRING_ARRAY('本次改动的项目内相对路径（可选，会登记为 artifact）'),
-    noOutOfScopeChanges: B('必须为 true：声明本任务没有改切片写作用域之外的文件'),
+    noOutOfScopeChanges: B('必须为 true：声明本任务没有改切片写作用域之外的文件（实际是否越界由真实 diff 校验）'),
+    failureCode: S('status=failed 时的失败码（如 TESTS_FAILED / BLOCKED_DEPENDENCY），会落库供对账查询'),
+    failureDetail: S('status=failed 时的失败详情（可复核的一句话）'),
+    acceptedOutOfScope: B('片外改动已由 PM 接受时置 true（需同时给 outOfScopeReason；仅 scopePolicy=declare 生效）'),
+    outOfScopeReason: S('接受片外改动的理由'),
   }, ['handoff', 'noOutOfScopeChanges']),
   actors: ['task'],
   execute: async function (args, _exec, actor, deps) {
@@ -218,6 +223,10 @@ export const sessionFinishTask = {
     const sliceId = requireSliceId(actor, undefined)
     const slice = deps.store.getSlice(db, sliceId)
     if (!slice) throw fail('NOT_FOUND', '切片不存在：' + sliceId)
+    // 租约守卫：收工也是一次写入。租约被他人接管后仍允许收工会让「任务 done / 切片 review」
+    // 与「别人持租在写」同时成立（P1 缺陷）。这里在写入前先确认写作用域仍属于本会话。
+    // v4：除 holder 外还校验栅栏令牌——抢占后旧会话的重试必须被拒（LEASE_FENCED）。
+    deps.leases.assertWriteScope(db, { sliceId: sliceId, sessionId: actor.session.id })
     const contextTaskId = actor.session && actor.session.context ? actor.session.context.taskId : undefined
     // 证据校验：显式 evidenceIds 或本切片/本任务已记录的证据，至少 1 条
     let evidenceCount = 0
@@ -235,6 +244,44 @@ export const sessionFinishTask = {
     if (evidenceCount === 0) {
       throw fail('NO_EVIDENCE', '收工前必须有证据：先 evidence_add 记录测试/命令/评审结果（至少 1 条）')
     }
+    // 切片作用域校验（v4）：拿**真实工作区 diff** 去对作用域声明。
+    //
+    // 为什么放在证据校验之后：错误要按「先补什么」排序。
+    // 没有证据是缺一步记录（1 条命令就能补）；越界是改错了地方（要回滚或重新划范围）。
+    // 把「先补证据」摆在前面，收工失败时提示的才是真正该做的下一件事。
+    //
+    // 旧实现只校验调用方「声明了」片外零改动 —— 声明永远能写 true，等于没校验。
+    // 现在：能判定（有 git + 有声明）就真判；不能判定就如实标注 verifiable=false，
+    // 而不是伪造一个「通过」（这才是「声明 ≠ 证据」的正确处理方式）。
+    let scopeCheck
+    try {
+      const projectJson = deps.registry && typeof deps.registry.projectJson === 'function' ? deps.registry.projectJson(actor.root) : undefined
+      scopeCheck = validateFinish(db, {
+        sliceId: sliceId,
+        root: actor.root,
+        policy: scopePolicyOf(projectJson),
+        acceptedOutOfScope: args.acceptedOutOfScope === true,
+        outOfScopeReason: args.outOfScopeReason,
+      })
+    } catch (error) {
+      scopeCheck = {
+        ok: false, policy: 'strict', basis: 'unavailable', verifiable: false,
+        reason: String((error && error.message) || error), unresolved: true,
+        counts: { changed: 0, inScope: 0, outOfScope: 0, crossScope: 0 },
+        inScope: [], outOfScope: [], crossScope: [], declared: [],
+        issues: [{ code: 'SCOPE_CHECK_ERROR', message: String((error && error.message) || error) }],
+      }
+    }
+    if (!scopeCheck.ok) {
+      throw fail('OUT_OF_SCOPE_CHANGES', '收工被拒：切片作用域校验未通过 —— ' + scopeCheck.issues.map(function (issue) { return issue.message }).join('；'), {
+        sliceId: sliceId,
+        scope: {
+          policy: scopeCheck.policy, basis: scopeCheck.basis, verifiable: scopeCheck.verifiable,
+          counts: scopeCheck.counts, outOfScope: scopeCheck.outOfScope, crossScope: scopeCheck.crossScope,
+          declared: scopeCheck.declared, issues: scopeCheck.issues,
+        },
+      })
+    }
     // 片外零改动声明 → 登记改动文件为 artifact
     const files = Array.isArray(args.files) ? args.files.map(function (path) { return normalizeProjectPath(path) }) : []
     for (const file of files) {
@@ -247,31 +294,67 @@ export const sessionFinishTask = {
     if (contextTaskId) {
       try { deps.store.updateTask(db, { id: contextTaskId, status: status === 'done' ? 'done' : 'failed' }) } catch (error) { /* 任务状态更新失败不阻断 */ }
     }
+    let finishedSlice = slice
     try {
-      deps.store.updateSliceStatus(db, {
+      finishedSlice = deps.store.updateSliceStatus(db, {
         id: sliceId,
         status: status === 'done' ? 'review' : 'blocked',
         currentHandoff: handoff.slice(0, 800),
         role: actor.role,
-      })
-    } catch (error) { /* 切片状态更新失败不阻断 */ }
-    const ended = deps.store.endSession(db, { id: actor.session.id, status: status, handoffId: handoffDoc.doc.id })
+      }) || slice
+    } catch (error) { /* 切片状态更新失败不阻断（返回值回落到更新前记录） */ }
+    const ended = deps.store.endSession(db, {
+      id: actor.session.id,
+      status: status,
+      handoffId: handoffDoc.doc.id,
+      // 失败必须留原因（v4）：只写 status='failed' 的会话，重启对账/面板/PM 都无法回答「为什么失败」。
+      failureCode: status === 'failed' ? (optionalText(args.failureCode) || 'TASK_REPORTED_FAILED') : undefined,
+      failureDetail: status === 'failed' ? (optionalText(args.failureDetail) || handoff.slice(0, 500)) : undefined,
+    })
     try { deps.leases.releaseLease(db, { sliceId: sliceId, sessionId: actor.session.id }) } catch (error) { /* 租约已释放/被他人持有 */ }
     invalidateActorCache(actor.dshSessionId)
     const notified = await notifyPm(deps.ctx, deps, db, {
       senderAgent: _exec && _exec.agent,
       signal: _exec && _exec.signal,
-      text: '【任务会话 ' + actor.name + ' 收工】status=' + status + '；证据 ' + evidenceCount + ' 条；改动文件 ' + files.length + ' 个；交接文档 v' + handoffDoc.version.version + '。' + handoff.slice(0, 400),
+      text: '【任务会话 ' + actor.name + ' 收工】status=' + status
+        + (status === 'failed' ? '（' + (ended.failureCode || 'TASK_REPORTED_FAILED') + '）' : '')
+        + '；证据 ' + evidenceCount + ' 条；改动文件 ' + files.length + ' 个；交接文档 v' + handoffDoc.version.version
+        + '；作用域 ' + (scopeCheck.verifiable
+          ? ('已校验：改动 ' + scopeCheck.counts.changed + ' 个，域内 ' + scopeCheck.counts.inScope + '，域外 ' + scopeCheck.counts.outOfScope)
+          : ('未校验（' + (scopeCheck.unresolvedReason || 'unknown') + '）'))
+        + '。' + handoff.slice(0, 400),
     })
     notifyWrite(deps, actor)
     return {
       finished: true,
       status: status,
-      session: { id: ended.id, name: ended.name, status: ended.status },
-      slice: { id: slice.id, key: slice.key, status: 'review' },
+      session: {
+        id: ended.id, name: ended.name, status: ended.status,
+        failureCode: ended.failureCode, failureDetail: ended.failureDetail, attempt: ended.attempt,
+      },
+      slice: {
+        id: finishedSlice.id,
+        key: finishedSlice.key,
+        status: finishedSlice.status,
+      },
+      sliceBefore: { status: slice.status, ownerRole: slice.ownerRole },
       handoff: { docId: handoffDoc.doc.id, version: handoffDoc.version.version, created: handoffDoc.created },
       evidenceCount: evidenceCount,
       files: files,
+      // 作用域校验结果必须回传：这是「片外零改动」从声明变成证据的那一步，人要看得到证据。
+      scope: {
+        policy: scopeCheck.policy,
+        basis: scopeCheck.basis,
+        baseline: scopeCheck.baseline,
+        verifiable: scopeCheck.verifiable,
+        unresolved: scopeCheck.unresolved,
+        unresolvedReason: scopeCheck.unresolvedReason,
+        counts: scopeCheck.counts,
+        inScope: scopeCheck.inScope,
+        outOfScope: scopeCheck.outOfScope,
+        crossScope: scopeCheck.crossScope,
+        declared: scopeCheck.declared,
+      },
       notified: notified,
     }
   },
