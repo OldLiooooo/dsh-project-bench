@@ -7,6 +7,13 @@
 .dsh-poc/
 .tmp-api-test-*/
 
+# 测试探针每次重建的仓库副本（probes/governance-e2e.mjs 会 rm -rf 后重灌）
+.sandbox/
+# native 扩展缓存产物（含 .node 二进制），来自 DSH 运行时的 undefined 路径
+undefined/
+# 本仓库自身被插件初始化出的运行时目录（仅根目录；不影响插件对 .project 的语义）
+/.project/
+
 # ===== 凭据与本地备份（绝不上传）=====
 .artifacts/
 *.credentials.yaml
