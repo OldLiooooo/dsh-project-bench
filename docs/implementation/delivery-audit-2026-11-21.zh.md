@@ -21,8 +21,12 @@
 ## 1. 今天实跑的测试（命令逐条可复跑）
 
 ```bash
-export DSH_HOME='<workspace>/.artifacts/dshhome-audit'   # 必须指到工作区内，否则写 ~/.dsh 会被沙箱拒绝
+# 必须指到工作区内（真实 ~/.dsh 对沙箱是 EPERM，这本身反证单写成立），且必须写 Windows 路径：
+# MSYS 的 $(pwd) 给 /c/Users/...，node 会拼成 C:\c\Users\... → 整批 EPERM。
+export DSH_HOME='C:/Users/you/repo/.artifacts/dshhome'
 ```
+
+全部在 **commit `99926f2`（origin/main HEAD）** 上复跑，工作区 `git status` 干净。
 
 | # | 命令 | 结果 | 备注 |
 |---|---|---|---|
