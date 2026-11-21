@@ -129,6 +129,56 @@ export function normalizeStageTemplate(input) {
  * @param {object|undefined} projectJson
  * @returns {{template: Array<object>, source: 'project.json'|'default', error?: {code:string,message:string}}}
  */
+/**
+ * 解析「每个阶段允许产出哪些文档类型」（B3：deliverableTypes 此前只写不读）。
+ *
+ * 为什么要读它：内置模板给 S1 写了 deliverableTypes:['prd']、S2 写 ['ux']……
+ * 但这些声明从来没有被任何代码消费，于是「S1 阶段只能产 PRD」一直只是文案。
+ * 设计 §12.1 把「每阶段写路径硬控制」列为阶段机的核心，这是它的最小可用版：
+ * 不拦文件系统（那是 scope.js 的事），只拦**文档类型**这件可判定的事。
+ *
+ * 返回 stageKey → 允许的 type 数组。没有 deliverableTypes 的阶段不出现在 Map 里
+ * （= 该阶段不做类型约束，例如 lumio 模板里只声明了部分阶段的场景）。
+ * @returns {Map<string, string[]>}
+ */
+export function resolveStageDeliverables(projectJson) {
+  const map = new Map()
+  const resolved = resolveStageTemplate(projectJson)
+  for (const stage of resolved.template || []) {
+    const types = Array.isArray(stage.deliverableTypes) ? stage.deliverableTypes.filter((t) => typeof t === 'string' && t.trim() !== '') : []
+    if (types.length > 0) map.set(String(stage.key), types)
+  }
+  return map
+}
+
+/**
+ * 判断某阶段是否允许产出某文档类型（B3）。
+ *
+ * 三档结论，与 scope.js 的策略一致：能判定才判定，不能判定如实标注。
+ *   { allowed: true,  enforced: false } —— 该阶段没声明 deliverableTypes，不约束
+ *   { allowed: true,  enforced: true  } —— 声明了且类型在允许列表里
+ *   { allowed: false, enforced: true  } —— 声明了但类型不在列表里 → 拒绝
+ *
+ * @returns {{allowed:boolean, enforced:boolean, stageKey?:string, allowedTypes?:string[], reason?:string}}
+ */
+export function checkDeliverableType(projectJson, stageKey, type) {
+  if (!stageKey) return { allowed: true, enforced: false, reason: 'no-stage：当前没有 active 阶段，不做类型约束' }
+  if (!type) return { allowed: true, enforced: false, reason: 'no-type：调用方没指定文档类型' }
+  const deliverables = resolveStageDeliverables(projectJson)
+  const allowedTypes = deliverables.get(String(stageKey))
+  if (!allowedTypes) {
+    return { allowed: true, enforced: false, stageKey: String(stageKey), reason: 'stage-declares-nothing：阶段 ' + stageKey + ' 没有声明 deliverableTypes' }
+  }
+  const allowed = allowedTypes.includes(String(type))
+  return {
+    allowed,
+    enforced: true,
+    stageKey: String(stageKey),
+    allowedTypes,
+    reason: allowed ? undefined : ('阶段 ' + stageKey + ' 只允许产出 ' + allowedTypes.join('/') + '，不接受 ' + type),
+  }
+}
+
 export function resolveStageTemplate(projectJson) {
   const candidate = projectJson && projectJson.stageTemplate
   if (candidate === undefined || candidate === null) {

@@ -31,8 +31,29 @@ const HOME_DSH = join(homedir(), '.dsh')
 const dshHomeOutsideWorkspace = DSH_HOME_ENV && !(DSH_HOME_ENV === WORKSPACE_ROOT || DSH_HOME_ENV.startsWith(WORKSPACE_ROOT + sep))
 const REAL_DSH_HOME = dshHomeOutsideWorkspace ? DSH_HOME_ENV : HOME_DSH
 const REAL_STORE_PROBE = join(REAL_DSH_HOME, 'storages', 'project-workbench', 'probe-writability')
+// 探针结果要能解释「为什么可写」，否则一个 FAIL 会让人以为是代码回归。
+// 真实可能只有三种：
+//   EPERM                        → 单写成立（workspace-write 模式，这是 M0 的预期）
+//   可写 + 工作区外 DSH_HOME      → 该进程根本不是受限沙箱（如 danger-full-access）
+//   可写 + 工作区内 DSH_HOME      → 探的是测试自己的 store，不是真实目录
 let sandboxCanWriteRealStore = true
-try { await mkdir(REAL_STORE_PROBE, { recursive: true }) } catch { sandboxCanWriteRealStore = false }
+let sandboxWriteProbe = { target: REAL_DSH_HOME, writable: false, code: null, hint: '' }
+try {
+  await mkdir(REAL_STORE_PROBE, { recursive: true })
+  sandboxWriteProbe = {
+    target: REAL_DSH_HOME, writable: true, code: null,
+    hint: dshHomeOutsideWorkspace
+      ? '该进程不是受限沙箱（当前文件策略可能是 danger-full-access）→ 单写保证在本次运行中不成立'
+      : '探的是工作区内的测试 store，不是真实用户目录',
+  }
+} catch (error) {
+  sandboxCanWriteRealStore = false
+  sandboxWriteProbe = { target: REAL_DSH_HOME, writable: false, code: error && error.code, hint: '' }
+} finally {
+  // 无论可写与否都要清掉探针目录：可写时留着就是往用户真实目录里塞垃圾
+  // （本次就撞到了这一点，见交付审计 §6「单写保证依赖沙箱模式」）。
+  try { await rm(REAL_STORE_PROBE, { recursive: true, force: true }) } catch (error) { /* 清不掉就留着，但不影响结论 */ }
+}
 process.env.DSH_HOME = join(WORKSPACE_ROOT, '.artifacts', 'governance-dshhome')
 
 async function load(rel) { return import(pathToFileURL(join(WORKBENCH_ROOT, rel)).href) }
@@ -42,6 +63,19 @@ function check(name, ok, detail) {
   results.push({ name, ok })
   console.log((ok ? 'PASS  ' : 'FAIL  ') + name + (detail ? '  — ' + String(detail).slice(0, 320) : ''))
   return ok
+}
+
+/**
+ * SKIP：断言在当前环境里**无法被验证**（不是通过，也不是失败）。
+ *
+ * 为什么需要它：②c 探的是「会话沙箱写不进真实 ~/.dsh」。在 workspace-write 策略下这是 EPERM（成立）；
+ * 但在 danger-full-access 下进程本来就能写，于是这条断言既不能判 PASS（会撒谎）
+ * 也不能判 FAIL（会被误读成代码回归）。三态里必须有 SKIP 这一档。
+ */
+const skipped = []
+function skip(name, detail) {
+  skipped.push({ name })
+  console.log('SKIP  ' + name + (detail ? '  — ' + String(detail).slice(0, 320) : ''))
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +151,23 @@ check('② headless 下能初始化项目（无 workspaceRegistry 也成立）',
 const storePaths = registryMod.projectPaths(SANDBOX)
 check('②a 权威源已外移到 store（不在工作区内）', storePaths.external === true && storePaths.storeRoot !== join(SANDBOX, '.project'), 'store=' + storePaths.storeRoot)
 check('②b 工作区里不再有 project.db（agent 碰不到权威源）', !existsSync(join(SANDBOX, '.project', 'project.db')) && !existsSync(join(SANDBOX, '.project', 'project.json')), 'workspace .project 仅剩导出投影')
-check('②c 会话沙箱写不进真实 $DSH_HOME/storages（物理单写前提）', sandboxCanWriteRealStore === false, sandboxCanWriteRealStore ? '⚠ 可写：单写未成立' : 'EPERM ✓ ' + REAL_STORE_PROBE)
+if (sandboxCanWriteRealStore) {
+  // 可写只有两种可能：
+  //   a) 该进程本来就不受限（danger-full-access）→ 前提无法在本环境验证 → SKIP
+  //   b) 探针探错了目录（测试 bug）→ FAIL
+  // 判据：REAL_DSH_HOME 是否真的是用户目录。它等于 homedir()/.dsh 时是真实目录，
+  // 且此时"可写"说明进程不受限（因为受限沙箱下它就是 EPERM）。
+  const pointedAtRealUserHome = resolve(REAL_DSH_HOME) === resolve(HOME_DSH)
+  if (pointedAtRealUserHome) {
+    skip('②c 会话沙箱写不进真实 $DSH_HOME/storages（物理单写前提）',
+      '本次运行的文件策略允许写真实 ~/.dsh（danger-full-access），该前提无法在此环境验证；'
+      + '在 workspace-write 下重跑才是有效证据。target=' + sandboxWriteProbe.target)
+  } else {
+    check('②c 会话沙箱写不进真实 $DSH_HOME/storages（物理单写前提）', false, '探针指到了非用户目录（探针 bug）：' + sandboxWriteProbe.target)
+  }
+} else {
+  check('②c 会话沙箱写不进真实 $DSH_HOME/storages（物理单写前提）', true, 'EPERM ✓ ' + REAL_STORE_PROBE + '(' + sandboxWriteProbe.code + ')')
+}
 
 let remap
 try { registry.applyStageRemap(SANDBOX, defaults.LUMIO_STAGE_TEMPLATE) } catch (error) { remap = error }
@@ -239,5 +289,6 @@ check('㉓ 导出快照成功（治理产物落盘）', !exported.error, exporte
 
 registry.closeAll()
 const failed = results.filter((item) => !item.ok).length
-console.log(String.fromCharCode(10) + '[governance-e2e] passed=' + String(results.length - failed) + ' failed=' + String(failed))
+console.log(String.fromCharCode(10) + '[governance-e2e] passed=' + String(results.length - failed) + ' failed=' + String(failed)
+  + (skipped.length > 0 ? ' skipped=' + String(skipped.length) + '（环境无法验证，不是通过）' : ''))
 process.exitCode = failed > 0 ? 1 : 0
