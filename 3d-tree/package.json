@@ -1,0 +1,22 @@
+{
+  "name": "@local/dsh-3d-tree",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "只读 3D 项目树视图：把 .project/project.db 渲染成可交互的三维完成度树，零依赖独立服务。",
+  "exports": {
+    ".": "./server.mjs",
+    "./model": "./model.mjs",
+    "./projection": "./web/projection.js"
+  },
+  "bin": {
+    "dsh-3d-tree": "./server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node tests/model.test.mjs && node tests/projection.test.mjs && node tests/render.test.mjs && node tests/scene.test.mjs && node tests/server.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

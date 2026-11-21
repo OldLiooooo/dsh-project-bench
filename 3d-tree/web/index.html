@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D 项目树</title>
+<style>
+  :root {
+    --bg: #05070d; --glass: rgba(12,17,28,.78);
+    --border: rgba(140,170,220,.14); --border-hi: rgba(140,170,220,.30);
+    --text: #dce7f7; --dim: #7b8aa5; --faint: #55637c;
+    --good: #35e08d; --warn: #e8b33c; --bad: #e8574d;
+    --accent: #59b0ff; --leaf: #7ee0c0;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--text);
+    font: 13px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  canvas#gl { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas#gl:active { cursor: grabbing; }
+
+  #topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center;
+    gap: 14px; padding: 14px 20px; pointer-events: none; z-index: 10; }
+  #topbar > * { pointer-events: auto; }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand-mark { width: 30px; height: 30px; border-radius: 9px;
+    background: radial-gradient(circle at 32% 28%, #6fe7b0, #2a7fd4 62%, #12305e);
+    box-shadow: 0 0 22px rgba(90,180,255,.45), inset 0 0 12px rgba(255,255,255,.28); flex: none; }
+  .brand-text h1 { font-size: 14px; font-weight: 650; margin: 0; }
+  .brand-text .sub { font-size: 10.5px; color: var(--faint); letter-spacing: .06em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+
+  .chips { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+    background: var(--glass); border: 1px solid var(--border); backdrop-filter: blur(14px);
+    font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+  .chip[data-tone="good"] { border-color: rgba(53,224,141,.34); }
+  .chip[data-tone="warn"] { border-color: rgba(232,179,60,.34); }
+  .chip[data-tone="bad"]  { border-color: rgba(232,87,77,.34); }
+  button.chip { cursor: pointer; font: inherit; font-size: 11.5px; }
+  button.chip:hover { border-color: var(--border-hi); color: var(--text); }
+  button.chip[aria-pressed="true"] { background: rgba(89,176,255,.18); border-color: rgba(89,176,255,.55); color: #cfe6ff; }
+  button.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  #branchdock { position: fixed; top: 76px; right: 20px; width: 262px; max-height: calc(100vh - 150px);
+    display: flex; flex-direction: column; background: var(--glass); border: 1px solid var(--border);
+    border-radius: 14px; backdrop-filter: blur(18px); overflow: hidden; z-index: 9;
+    transition: transform .22s ease, opacity .22s ease; }
+  .dock-head { padding: 11px 13px 8px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; }
+  .dock-head .t { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .dock-head .n { margin-left: auto; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .dock-list { overflow: auto; padding: 6px; scrollbar-width: thin; }
+  .dock-list::-webkit-scrollbar { width: 6px; }
+  .dock-list::-webkit-scrollbar-thumb { background: rgba(140,170,220,.18); border-radius: 3px; }
+
+  .brow { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 9px;
+    cursor: pointer; border: 1px solid transparent; }
+  .brow:hover { background: rgba(120,160,220,.09); border-color: var(--border); }
+  .brow[data-active="true"] { background: rgba(89,176,255,.14); border-color: rgba(89,176,255,.42); }
+  .brow .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 10px currentColor; }
+  .brow .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .brow .files { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; flex: none; }
+  .brow .tag { font-size: 9.5px; padding: 1px 5px; border-radius: 5px; flex: none;
+    background: rgba(120,150,200,.16); color: var(--dim); }
+
+  #hint { position: fixed; left: 20px; bottom: 16px; display: flex; gap: 14px; align-items: center;
+    font-size: 11px; color: var(--faint); z-index: 8; }
+  #hint kbd { font: inherit; font-size: 10px; padding: 1px 5px; border-radius: 4px;
+    background: rgba(140,170,220,.12); border: 1px solid var(--border); color: var(--dim); }
+  #live { display: inline-flex; align-items: center; gap: 6px; }
+  #live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+  #live[data-state="on"] .dot { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  #live[data-state="off"] .dot { background: var(--bad); }
+
+  #tip { position: fixed; z-index: 30; pointer-events: none; padding: 6px 10px; border-radius: 8px;
+    background: rgba(8,12,20,.94); border: 1px solid var(--border-hi); font-size: 11.5px; color: var(--text);
+    max-width: 320px; opacity: 0; transform: translateY(4px);
+    transition: opacity .12s ease, transform .12s ease; box-shadow: 0 8px 26px rgba(0,0,0,.5); }
+  #tip[data-show="true"] { opacity: 1; transform: translateY(0); }
+  #tip .k { color: var(--faint); font-size: 10.5px; display: block; margin-top: 2px; }
+
+  #modal { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center;
+    background: rgba(3,5,10,.74); backdrop-filter: blur(6px); padding: 24px; }
+  #modal[data-open="true"] { display: flex; }
+  .sheet { width: min(720px, 100%); max-height: 84vh; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #101725, #0b101a); border: 1px solid var(--border-hi);
+    border-radius: 16px; box-shadow: 0 28px 80px rgba(0,0,0,.66); overflow: hidden; }
+  .sheet-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 13px;
+    border-bottom: 1px solid var(--border); }
+  .sheet-head .titles { flex: 1; min-width: 0; }
+  .sheet-head h2 { font-size: 15px; margin: 0 0 3px; font-weight: 650; overflow-wrap: anywhere; }
+  .sheet-head .sub { font-size: 11.5px; color: var(--dim); }
+  .x { flex: none; width: 28px; height: 28px; border-radius: 8px; background: rgba(140,170,220,.10);
+    border: 1px solid var(--border); color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; }
+  .x:hover { color: var(--text); border-color: var(--border-hi); }
+  .sheet-body { overflow: auto; padding: 16px 18px 22px; }
+
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 9px; margin-bottom: 16px; }
+  .metric { padding: 10px 12px; border-radius: 11px; background: rgba(120,160,220,.07); border: 1px solid var(--border); }
+  .metric .k { font-size: 10.5px; color: var(--faint); }
+  .metric .v { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .bar { height: 5px; border-radius: 99px; background: rgba(140,170,220,.13); overflow: hidden; margin: 7px 0 3px; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; }
+
+  h3.sec { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint);
+    margin: 18px 0 8px; font-weight: 650; }
+  h3.sec:first-child { margin-top: 0; }
+
+  .srow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; border: 1px solid transparent; }
+  .srow:hover { background: rgba(120,160,220,.06); border-color: var(--border); }
+  .srow .code { font: 600 11px ui-monospace, Consolas, monospace; color: var(--dim); width: 30px; flex: none; }
+  .srow .name { width: 52px; flex: none; font-size: 12px; }
+  .srow .track { flex: 1; }
+  .srow .pct { width: 42px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+  .srow .miss { font-size: 10.5px; color: var(--warn); }
+
+  .frow { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 11.5px; }
+  .frow:hover { background: rgba(120,160,220,.06); }
+  .frow .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .frow .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .frow .meta { color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; flex: none; }
+  .frow .path { display: block; color: var(--faint); font: 10px ui-monospace, Consolas, monospace;
+    margin-top: 1px; overflow-wrap: anywhere; }
+  .empty { color: var(--faint); font-size: 12px; padding: 8px 2px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="topbar">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div class="brand-text">
+      <h1 id="projectName">3D 项目树</h1>
+      <div class="sub" id="projectSub">loading</div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips"></div>
+</div>
+
+<div id="branchdock">
+  <div class="dock-head">
+    <span class="t">分支状态</span>
+    <span class="n" id="branchCount">–</span>
+  </div>
+  <div class="dock-list" id="branchList"></div>
+</div>
+
+<div id="hint">
+  <span id="live" data-state="off"><i class="dot"></i><span id="liveText">连接中</span></span>
+  <span><kbd>拖拽</kbd> 旋转</span>
+  <span><kbd>滚轮</kbd> 缩放</span>
+  <span><kbd>点击</kbd> 详情</span>
+  <span><kbd>R</kbd> 重置</span>
+</div>
+
+<div id="tip"></div>
+
+<div id="modal" aria-hidden="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-head">
+      <div class="titles">
+        <h2 id="sheetTitle">详情</h2>
+        <div class="sub" id="sheetSub"></div>
+      </div>
+      <button class="x" type="button" id="modalClose" aria-label="关闭">×</button>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+</div>
+
+<script type="module">
+import { createViewer } from './viewer.js'
+
+const $ = (id) => document.getElementById(id)
+const canvas = $('gl')
+let tree = null
+const viewer = createViewer(canvas)
+
+const TONE = {
+  done: 'var(--good)', completed: 'var(--good)', complete: 'var(--good)',
+  active: 'var(--accent)', in_progress: 'var(--accent)', review: 'var(--warn)',
+  open: '#7b93c9', pending: '#7b93c9', untracked: '#5b7396',
+  blocked: 'var(--bad)', failed: 'var(--bad)', attention: 'var(--warn)',
+  stale: 'var(--bad)', synced: 'var(--leaf)', empty: 'var(--warn)'
+}
+const LABEL = {
+  done: '已完成', completed: '已完成', complete: '已完成',
+  active: '进行中', in_progress: '进行中', review: '评审中',
+  open: '待处理', pending: '待开始', untracked: '未纳管',
+  blocked: '阻塞', failed: '失败', attention: '待决策',
+  stale: '未导出', synced: '已落地', empty: '无正文'
+}
+const tone = (s) => TONE[String(s || '').toLowerCase()] || 'var(--dim)'
+const label = (s) => LABEL[String(s || '').toLowerCase()] || (s || '—')
+
+function esc(t) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+  return String(t === undefined || t === null ? '' : t).replace(/[&<>"']/g, (c) => map[c])
+}
+
+function renderChips() {
+  const t = tree.trunk
+  const toneName = t.blockedSlices > 0 ? 'bad' : t.pendingDecisions > 0 ? 'warn' : 'good'
+  const parts = []
+  parts.push('<span class="chip" data-tone="' + toneName + '"><i class="dot" style="background:' + tone(t.status) + ';color:' + tone(t.status) + '"></i>' + esc(label(t.status)) + '</span>')
+  parts.push('<span class="chip"><b>' + t.branchCount + '</b> 分支</span>')
+  parts.push('<span class="chip"><b>' + t.fileCount + '</b> 文件</span>')
+  if (t.missingFiles > 0) parts.push('<span class="chip" data-tone="bad"><i class="dot" style="background:var(--bad);color:var(--bad)"></i><b>' + t.missingFiles + '</b> 未落地</span>')
+  if (t.pendingDecisions > 0) parts.push('<span class="chip" data-tone="warn"><i class="dot" style="background:var(--warn);color:var(--warn)"></i><b>' + t.pendingDecisions + '</b> 待拍板</span>')
+  if (t.blockedSlices > 0) parts.push('<span class="chip" data-tone="bad"><b>' + t.blockedSlices + '</b> 阻塞</span>')
+  parts.push('<button class="chip" type="button" id="btnRotate" aria-pressed="false">自动旋转</button>')
+  parts.push('<button class="chip" type="button" id="btnFit">重置视角</button>')
+  parts.push('<button class="chip" type="button" id="btnStages">阶段进度</button>')
+  $('chips').innerHTML = parts.join('')
+  $('btnRotate').addEventListener('click', (e) => {
+    const on = viewer.setAutoRotate(!viewer.getAutoRotate())
+    e.currentTarget.setAttribute('aria-pressed', String(on))
+  })
+  $('btnFit').addEventListener('click', () => viewer.frame())
+  $('btnStages').addEventListener('click', openStages)
+}
+
+function renderDock() {
+  const list = $('branchList')
+  const branches = tree.branches || []
+  $('branchCount').textContent = branches.length + ' 条'
+  if (branches.length === 0) {
+    list.innerHTML = '<div class="empty" style="padding:12px">还没有切片。进入 PM 对话开始项目。</div>'
+    return
+  }
+  const rows = branches.map((b) => {
+    const tag = b.untracked ? '<span class="tag">未纳管</span>' : ''
+    return '<div class="brow" data-branch="' + esc(b.id) + '">'
+      + '<i class="dot" style="background:' + tone(b.status) + ';color:' + tone(b.status) + '"></i>'
+      + '<span class="label" title="' + esc(b.title) + '">' + esc(b.title) + '</span>'
+      + tag + '<span class="files">' + b.fileCount + '</span></div>'
+  })
+  list.innerHTML = rows.join('')
+  for (const row of list.querySelectorAll('[data-branch]')) {
+    row.addEventListener('click', () => {
+      const id = row.getAttribute('data-branch')
+      const branch = (tree.branches || []).find((b) => b.id === id)
+      for (const r of list.querySelectorAll('[data-branch]')) r.setAttribute('data-active', String(r === row))
+      viewer.focusBranch(id)
+      if (branch) openBranch(branch)
+    })
+  }
+}
+
+const tip = $('tip')
+viewer.on('hover', (node) => {
+  if (!node) { tip.setAttribute('data-show', 'false'); return }
+  const lines = []
+  if (node.kind === 'branch') {
+    lines.push('<b>' + esc(node.label) + '</b>')
+    lines.push('<span class="k">' + label(node.status) + ' · ' + ((node.data && node.data.fileCount) || 0) + ' 个文件</span>')
+  } else if (node.kind === 'file') {
+    const f = node.file
+    lines.push('<b>' + esc(node.label) + '</b>')
+    lines.push('<span class="k">' + label(f.state) + ' · ' + esc(f.type) + (f.version ? ' v' + f.version : '') + '</span>')
+  } else {
+    lines.push('<b>主干</b><span class="k">项目状态：' + label(tree && tree.trunk ? tree.trunk.status : '') + '</span>')
+  }
+  tip.innerHTML = lines.join('')
+  tip.setAttribute('data-show', 'true')
+})
+canvas.addEventListener('pointermove', (e) => {
+  tip.style.left = Math.min(e.clientX + 16, window.innerWidth - 340) + 'px'
+  tip.style.top = (e.clientY + 18) + 'px'
+})
+canvas.addEventListener('pointerleave', () => tip.setAttribute('data-show', 'false'))
+
+viewer.on('select', (node) => {
+  if (!node) return
+  if (node.kind === 'branch') {
+    const branch = (tree.branches || []).find((b) => b.id === node.branchId)
+    if (branch) openBranch(branch)
+  } else if (node.kind === 'file') {
+    openFile(node.file)
+  } else if (node.kind === 'trunk') {
+    openStages()
+  }
+})
+
+function open(sheetTitle, sub, html) {
+  $('sheetTitle').textContent = sheetTitle
+  $('sheetSub').textContent = sub || ''
+  $('sheetBody').innerHTML = html
+  $('modal').setAttribute('data-open', 'true')
+  $('modal').setAttribute('aria-hidden', 'false')
+}
+function close() {
+  $('modal').setAttribute('data-open', 'false')
+  $('modal').setAttribute('aria-hidden', 'true')
+}
+$('modalClose').addEventListener('click', close)
+$('modal').addEventListener('click', (e) => { if (e.target === $('modal')) close() })
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if ($('modal').getAttribute('data-open') === 'true') close()
+    else viewer.clearSelection()
+  }
+  if (e.key === 'r' || e.key === 'R') viewer.frame()
+})
+
+function bar(pct, color) {
+  const w = Math.max(0, Math.min(100, pct))
+  return '<div class="bar"><i style="width:' + w + '%;background:' + color + '"></i></div>'
+}
+
+function openStages() {
+  const t = tree.trunk
+  let html = '<div class="metric-grid">'
+  html += '<div class="metric"><div class="k">流水线完成度</div><div class="v" style="color:' + tone(t.status) + '">' + t.completion + '%</div>' + bar(t.completion, tone(t.status)) + '</div>'
+  html += '<div class="metric"><div class="k">已开工阶段</div><div class="v">' + t.activeCompletion + '%</div>' + bar(t.activeCompletion, 'var(--accent)') + '</div>'
+  html += '<div class="metric"><div class="k">分支 / 文件</div><div class="v">' + t.branchCount + ' / ' + t.fileCount + '</div></div>'
+  html += '<div class="metric"><div class="k">未落地文件</div><div class="v" style="color:' + (t.missingFiles ? 'var(--bad)' : 'var(--dim)') + '">' + t.missingFiles + '</div></div>'
+  html += '</div>'
+  html += '<h3 class="sec">阶段</h3>'
+  for (const s of tree.stages) {
+    const d = s.completionDetail || {}
+    const color = s.completion >= 100 ? 'var(--good)' : s.completion > 0 ? 'var(--accent)' : 'rgba(120,150,200,.35)'
+    let miss = ''
+    if ((d.missing || []).length) {
+      miss = '<span class="miss">缺 ' + esc(d.missing.join(' / ')) + '</span>'
+      if (d.expected) miss += '<span class="miss" style="color:var(--faint)"> · 模板要 ' + esc(d.expected.join(' / ')) + '</span>'
+    } else if (d.expected && d.expected.length) {
+      miss = '<span class="miss" style="color:var(--good)">交付物齐全</span>'
+    }
+    html += '<div class="srow"><span class="code">' + esc(s.key) + '</span>'
+      + '<span class="name">' + esc(s.name) + '</span>'
+      + '<span class="track">' + bar(s.completion, color) + miss + '</span>'
+      + '<span class="pct" style="color:' + color + '">' + s.completion + '%</span></div>'
+  }
+  const pend = (tree.alerts && tree.alerts.pendingDecisions) || []
+  if (pend.length) {
+    html += '<h3 class="sec">待拍板决策</h3>'
+    for (const d of pend) {
+      html += '<div class="frow"><i class="st" style="background:' + (d.irreversible ? 'var(--bad)' : 'var(--warn)') + '"></i>'
+        + '<span class="nm">' + esc(d.title) + '</span>'
+        + (d.irreversible ? '<span class="meta" style="color:var(--bad)">不可逆</span>' : '') + '</div>'
+    }
+  }
+  open('阶段进度', tree.project.name + ' · 流水线 ' + t.completion + '% · 已开工 ' + t.activeCompletion + '%', html)
+}
+
+function openBranch(branch) {
+  let html = '<div class="metric-grid">'
+  html += '<div class="metric"><div class="k">状态</div><div class="v" style="font-size:15px;color:' + tone(branch.status) + '">' + esc(label(branch.status)) + '</div></div>'
+  html += '<div class="metric"><div class="k">文件</div><div class="v">' + branch.fileCount + '</div></div>'
+  if (!branch.untracked) {
+    html += '<div class="metric"><div class="k">任务</div><div class="v">' + branch.tasksDone + '/' + branch.tasksTotal + '</div></div>'
+    html += '<div class="metric"><div class="k">待拍板</div><div class="v" style="color:' + (branch.pendingDecisions ? 'var(--warn)' : 'var(--dim)') + '">' + branch.pendingDecisions + '</div></div>'
+  }
+  html += '</div>'
+  if (!branch.untracked) {
+    html += '<h3 class="sec">所属阶段</h3>'
+    html += '<div class="srow"><span class="code">' + esc(branch.stageKey || '—') + '</span><span class="name">' + esc(branch.stageName || '') + '</span><span class="track"></span></div>'
+  }
+  html += '<h3 class="sec">文件（' + branch.files.length + '）</h3>'
+  if (branch.files.length === 0) {
+    html += '<div class="empty">这条分支还没有产物文件。</div>'
+  } else {
+    const shown = branch.files.slice(0, 120)
+    for (const f of shown) {
+      html += '<div class="frow"><i class="st" style="background:' + tone(f.state) + '"></i>'
+        + '<span class="nm">' + esc(f.title) + '<span class="path">' + esc(f.exportPath || '（未导出）') + '</span></span>'
+        + '<span class="meta">' + esc(label(f.state)) + (f.version ? ' · v' + f.version : '') + '</span></div>'
+    }
+    if (branch.files.length > shown.length) {
+      html += '<div class="empty">还有 ' + (branch.files.length - shown.length) + ' 个文件未显示。</div>'
+    }
+  }
+  open(branch.title, (branch.untracked ? '未纳管文件目录' : '切片') + ' · ' + branch.files.length + ' 个文件', html)
+}
+
+function openFile(file) {
+  let html = '<div class="metric-grid">'
+  html += '<div class="metric"><div class="k">文件状态</div><div class="v" style="font-size:15px;color:' + tone(file.state) + '">' + esc(label(file.state)) + '</div></div>'
+  html += '<div class="metric"><div class="k">类型</div><div class="v" style="font-size:15px">' + esc(file.type) + '</div></div>'
+  if (file.version) html += '<div class="metric"><div class="k">版本</div><div class="v">v' + file.version + '</div></div>'
+  if (file.bytes) html += '<div class="metric"><div class="k">大小</div><div class="v">' + (file.bytes / 1024).toFixed(1) + 'K</div></div>'
+  html += '</div>'
+  html += '<h3 class="sec">路径</h3>'
+  html += '<div class="frow"><span class="nm" style="font:11.5px ui-monospace,Consolas,monospace">' + esc(file.exportPath || '（库里有版本，但磁盘上没有导出文件）') + '</span></div>'
+  open(file.title, file.type + ' · ' + label(file.state), html)
+}
+
+function applyTree(next) {
+  tree = next
+  viewer.setTree(tree)
+  $('projectName').textContent = (tree.project && tree.project.name) || '3D 项目树'
+  $('projectSub').textContent = tree.trunk.branchCount + ' branches · ' + tree.trunk.fileCount + ' files'
+  renderChips()
+  renderDock()
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/snapshot', { cache: 'no-store' })
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    applyTree(await res.json())
+  } catch (e) {
+    $('projectSub').textContent = '读取失败：' + e.message
+  }
+}
+
+function setLive(state, text) {
+  $('live').setAttribute('data-state', state)
+  $('liveText').textContent = text
+}
+
+function connectSse() {
+  if (!window.EventSource) { setLive('off', '不支持 SSE'); return }
+  const es = new EventSource('/api/events')
+  es.onopen = () => setLive('on', '实时')
+  es.onerror = () => setLive('off', '重连中')
+  es.onmessage = (ev) => {
+    let msg
+    try { msg = JSON.parse(ev.data) } catch (err) { return }
+    if (msg.type === 'snapshot' && msg.tree) applyTree(msg.tree)
+    else if (msg.type === 'error') setLive('off', '读取出错')
+  }
+}
+
+load()
+connectSse()
+</script>
+</body>
+</html>
