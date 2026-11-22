@@ -157,6 +157,64 @@ export function migrateV4(db) {
 }
 
 /**
+ * 迁移后自检（P0）：确认「本该立起来的结构」真的立起来了。
+ *
+ * 为什么需要它：迁移函数是幂等的、每一步都 try 不了全局（SQLite DDL 不支持事务回滚 DDL 的部分场景），
+ * 所以「迁移跑完没报错」不等于「结构对」。真出问题时最糟的表现是**静默半迁移**：
+ * 库能打开、能读写，但某个触发器没建上 —— 于是一条本该被拒的非法写会悄悄成功。
+ *
+ * 检查项（都便宜，都是结构级事实）：
+ *   ① schema_migrations 的 MAX(version) == SCHEMA_VERSION
+ *   ② 13 个触发器全在（缺一个 = 一条不变量失守）
+ *   ③ v4/v5 的关键列存在（列缺失会让读侧静默 undefined，最难查）
+ *
+ * @returns {{ok:boolean, issues:string[], version:number, triggers:number, columns:number}}
+ */
+export function verifyMigration(db) {
+  const issues = []
+  let version = 0
+  try {
+    const row = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get()
+    version = row && row.v !== null && row.v !== undefined ? Number(row.v) : 0
+  } catch (error) { issues.push('读不到 schema_migrations：' + String(error.message || error)) }
+  if (version !== SCHEMA_VERSION) issues.push('版本应到 v' + SCHEMA_VERSION + '，实际 v' + version)
+
+  let triggers = 0
+  try {
+    const names = db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all().map((row) => String(row.name))
+    triggers = names.length
+    const expected = GUARD_TRIGGERS.map((sql) => {
+      const match = /CREATE TRIGGER IF NOT EXISTS (\w+)/.exec(sql)
+      return match ? match[1] : null
+    }).filter(Boolean)
+    for (const name of expected) {
+      if (!names.includes(name)) issues.push('缺触发器 ' + name)
+    }
+  } catch (error) { issues.push('读不到触发器：' + String(error.message || error)) }
+
+  const REQUIRED_COLUMNS = {
+    sessions: ['failure_code', 'failure_detail', 'failure_at', 'attempt'],
+    leases: ['epoch'],
+    approvals: ['epoch'],
+    exports: ['error', 'batch_id'],
+    slices: ['scope_declared', 'verified_by', 'verified_at', 'verified_session'],
+    evidence: ['verified_at'],
+    decisions: ['default_option'],
+  }
+  let columns = 0
+  for (const [table, required] of Object.entries(REQUIRED_COLUMNS)) {
+    try {
+      const names = db.prepare('PRAGMA table_info(' + table + ')').all().map((row) => String(row.name))
+      columns += names.length
+      for (const column of required) {
+        if (!names.includes(column)) issues.push('缺列 ' + table + '.' + column)
+      }
+    } catch (error) { issues.push('读不到 ' + table + ' 的列：' + String(error.message || error)) }
+  }
+  return { ok: issues.length === 0, issues, version, triggers, columns }
+}
+
+/**
  * v5 迁移：Verified Done —— 把「已验证完成」变成数据模型里的一等状态。
  *
  * 为什么必须有这一步：设计 §6.2 定「唯一进度口径 = 已验证完成」，但 v4 的 slices 状态枚举是

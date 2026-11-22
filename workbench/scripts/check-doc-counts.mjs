@@ -73,7 +73,9 @@ export function measure() {
   return {
     tools,
     tables: (schema.match(/CREATE TABLE|CREATE VIRTUAL TABLE/g) || []).length,
-    triggers: (schema.match(/CREATE TRIGGER/g) || []).length,
+    // 只数**真的** CREATE TRIGGER 语句：行首是两个空格 + 反引号（模板字符串里的 DDL），
+    // 这样注释、正则字符串里的 "CREATE TRIGGER" 不会被误算（verifyMigration 里就有一处）。
+    triggers: (schema.match(/^\s{2}`CREATE TRIGGER/gm) || []).length,
     routes: (http.match(/^      case '/gm) || []).length,
     hostModules: readdirSync(join(WORKBENCH, 'host')).filter((f) => f.endsWith('.js')).length + toolFiles.length,
     clientLines: readText(join(WORKBENCH, 'client.js')).split('\n').length - 1,

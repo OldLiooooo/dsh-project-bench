@@ -1013,3 +1013,78 @@ test('W2: lumio 生命周期模板本身合法', function () {
   assert.deepEqual(normalized.template.map(function (s) { return s.key }), ['PRD', 'DEV', 'FILE', 'CODE'])
   assert.deepEqual(normalized.template.map(function (s) { return s.gate }), ['PRD-AUDIT', 'DEV-GATE', 'FILE-GATE', 'CODE-GATE'])
 })
+
+
+// ---------------------------------------------------------------------------
+// P0：迁移前备份 + 迁移后自检（生产可用性的最后一块硬要求）
+// ---------------------------------------------------------------------------
+
+test('P0 迁移备份：v4 库升级到 v5 前自动备份，且备份能恢复出可用的旧库', async (t) => {
+  const { ProjectDb, backupDatabase } = await import('../../host/db.js')
+  const { existsSync, readdirSync } = await import('node:fs')
+  const root = join(TMP_BASE, 'p0-backup-' + Date.now())
+  mkdirSync(root, { recursive: true })
+  const file = join(root, 'project.db')
+
+  // 造一个 v4 形态的库：先建，再把 v5 的痕迹抹掉（列删不了，就重建表 + 删版本记录）
+  const first = new ProjectDb(file, { projectId: 'p0-proj', projectName: 'P0', root })
+  first.db.exec('DROP TRIGGER IF EXISTS guard_verified_slice_terminal')
+  first.db.exec('DROP TRIGGER IF EXISTS guard_verified_requires_signer')
+  first.db.exec('DELETE FROM schema_migrations WHERE version >= 5')
+  first.close()
+
+  // 再打开：这次应触发 v4→v5 备份
+  const reopened = new ProjectDb(file, { root })
+  try {
+    assert.equal(reopened.migration.fromVersion, 4, '应识别出从 v4 迁移')
+    assert.equal(reopened.migration.toVersion, 5)
+    assert.ok(reopened.migration.backupPath, '必须产生备份路径')
+    assert.ok(existsSync(reopened.migration.backupPath), '备份文件必须真的存在：' + reopened.migration.backupPath)
+    assert.ok(/[\\/]_backup[\\/]/.test(reopened.migration.backupPath), '备份应放在 _backup/ 下')
+    assert.ok(reopened.migration.verified && reopened.migration.verified.ok, '迁移后自检必须通过：' + JSON.stringify(reopened.migration.verified))
+    // 备份文件非空
+    const { statSync } = await import('node:fs')
+    assert.ok(statSync(reopened.migration.backupPath).size > 0, '备份文件不能是空的')
+  } finally {
+    reopened.close()
+  }
+})
+
+test('P0 迁移自检：结构缺失时 verifyMigration 必须报出来（防静默半迁移）', async (t) => {
+  const { verifyMigration } = await import('../../host/schema.js')
+  const root = join(TMP_BASE, 'p0-verify-' + Date.now())
+  mkdirSync(root, { recursive: true })
+  const file = join(root, 'project.db')
+  const db = new ProjectDb(file, { projectId: 'p0-verify', projectName: 'P0', root })
+  try {
+    // 正常库：自检应通过，且触发器数 == 13
+    const good = verifyMigration(db.db)
+    assert.equal(good.ok, true, '正常库自检应通过：' + JSON.stringify(good.issues))
+    assert.equal(good.triggers, 13, '应看到 13 个触发器，实际 ' + good.triggers)
+    assert.equal(good.version, 5)
+
+    // 人为删掉一个不变量触发器 → 自检必须失败并点名
+    db.db.exec('DROP TRIGGER guard_verified_requires_signer')
+    const bad = verifyMigration(db.db)
+    assert.equal(bad.ok, false, '缺触发器时自检必须失败')
+    assert.ok(bad.issues.some((issue) => issue.includes('guard_verified_requires_signer')),
+      '必须点名缺了哪个触发器：' + JSON.stringify(bad.issues))
+  } finally {
+    db.close()
+  }
+})
+
+test('P0 迁移备份：全新库不产生备份（日常打开零成本）', async (t) => {
+  const root = join(TMP_BASE, 'p0-fresh-' + Date.now())
+  mkdirSync(root, { recursive: true })
+  const file = join(root, 'project.db')
+  const db = new ProjectDb(file, { projectId: 'p0-fresh', projectName: 'P0', root })
+  try {
+    assert.equal(db.migration.fromVersion, 5, '全新库直接是当前版本')
+    assert.equal(db.migration.backupPath, null, '全新库不该产生备份')
+    assert.equal(db.migration.verified, null, '全新库不做自检（没有跨版本）')
+  } finally {
+    db.close()
+  }
+})
+

@@ -1,24 +1,35 @@
-# dev web 实例 overlay（Lead/验证）：隔离 .devhome 没有 deskop profile 的模型路由，
-# 这里补 grsai provider（GRSAI_API_KEY 在 credentials refs），让 PM/任务会话能用真实模型跑通。
+# dev web 实例 overlay（Lead/验证）：隔离 .devhome 没有 desktop profile 的模型路由，
+# 这里补上真实可用的 provider，让 PM/任务会话能用真实模型跑通 live-e2e。
+#
+# 2026-11-22 修正：原来写的是 grsai / GRSAI_API_KEY / grsaiapi.com，
+# 但本机 .credentials.yaml 里只有 A_API_KEY，provider 实际是 a（sla.ddshub.site）。
+# 配置与凭据对不上 → live-e2e 起不来。改为与 desktop profile 一致的真实配置。
 - id: agent-default-model
   name: '@deepseek-ai/dsh-agent-default-model'
   config:
-    provider: grsai
+    provider: a
     model: gpt-6.1-sol
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
     providers:
-      grsai:
-        displayName: GRSAI
-        apiKeyEnv: GRSAI_API_KEY
+      a:
+        displayName: dds
+        apiKeyEnv: A_API_KEY
         api: openai-responses
-        baseURL: https://grsaiapi.com/v1
+        baseURL: https://sla.ddshub.site/v1
         models:
           - id: gpt-6.1-sol
-            name: gpt-6.1-sol
+            name: GPT-6.1 Sol
             contextWindow: 400000
             maxTokens: 32000
             input:
               - text
               - image
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              xhigh: xhigh
+              max: max

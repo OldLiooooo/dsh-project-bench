@@ -235,8 +235,13 @@ export async function startInstance(options = {}) {
   ensureDir(stateDir)
   const paths = pathsFor(stateDir)
   const logFd = openSync(paths.logFile, 'w')
-  const args = ['--expose-internals', cli, '--profile', options.profile || 'web', '--no-open', '--port', String(port)]
+  // 参数顺序是硬要求（2026-11-22 实测）：
+  //   --patch 是 dsh 的**全局选项**，必须出现在 profile 名（web）之前；
+  //   放在之后会被当成 web 子命令的选项 → "unknown option '--patch'"。
+  // 这条路径此前从未真正跑通过（live-e2e 自 11-12 就没成功过），所以一直没暴露。
+  const args = ['--expose-internals', cli]
   for (const patch of options.patches || []) args.push('--patch', resolve(patch))
+  args.push('--profile', options.profile || 'web', '--no-open', '--port', String(port))
   const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: home }
   let child
   try {
