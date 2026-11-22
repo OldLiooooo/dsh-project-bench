@@ -81,6 +81,15 @@ export function makeClientCtx() {
   return ctx
 }
 
+/** 把 React 元素树（本测试用 stub 生成）拍平成纯文本，便于断言列名/卡片标题是否出现。 */
+function flattenNodeText(node) {
+  if (node === null || node === undefined || node === false) return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(flattenNodeText).join(' ')
+  if (typeof node === 'object' && node.children) return flattenNodeText(node.children)
+  return ''
+}
+
 export async function makeSuite() {
   const cases = []
   const add = (name, fn) => cases.push({ name, fn })
@@ -467,6 +476,39 @@ export async function makeSuite() {
     const garbage = pure.projectProgress({ progress: { total: 'x', verified: null, percent: 'y' } })
     H2.expectEqual(garbage.total, 0)
     H2.expectEqual(garbage.percent, 0)
+  })
+
+  add('client: 看板把「已交付未验收」与「已验收」分成两列（不混淆 done 与 verified）', async () => {
+    const { exports } = await loadClientBundle()
+    const { __components: C, __dictionaries: D } = exports
+    H.expect(typeof C.BoardTab === 'function', 'BoardTab 必须导出（看板是 MVP 清单项）')
+    const { zh } = D
+    const t = (key, params) => {
+      const template = zh[key] !== undefined ? zh[key] : key
+      return String(template).replace(/\{(\w+)\}/g, (match, name) => (params && params[name] !== undefined ? String(params[name]) : match))
+    }
+    const tree = [{
+      stage: { id: 's1', key: 'S1', name: '产品', status: 'active' },
+      slices: [
+        { slice: { id: 'a', key: 'a', title: '未开始', status: 'open' }, stageKey: 'S1', counts: {} },
+        { slice: { id: 'b', key: 'b', title: '在做', status: 'in_progress' }, stageKey: 'S1', counts: {} },
+        { slice: { id: 'c', key: 'c', title: '阻塞', status: 'blocked' }, stageKey: 'S1', counts: {} },
+        { slice: { id: 'd', key: 'd', title: '说完了没验', status: 'done' }, stageKey: 'S1', counts: {} },
+        { slice: { id: 'e', key: 'e', title: '等验收', status: 'review' }, stageKey: 'S1', counts: {} },
+        { slice: { id: 'f', key: 'f', title: '验过了', status: 'verified', verifiedBy: '老李' }, stageKey: 'S1', counts: {} },
+      ],
+    }]
+    const norm = { tree, stages: [], sessions: [], pendingDecisions: [], recentTimeline: [], project: {} }
+    const node = C.BoardTab({ t, norm, treeData: { slices: [] }, maps: {}, onSelectRow: () => {}, runtime: {} })
+    const text = flattenNodeText(node)
+    // 关键断言：done 与 verified 必须落在不同列，且列名不能合并
+    H.expect(text.includes('已交付未验收'), '必须有「已交付未验收」列：' + text.slice(0, 300))
+    H.expect(text.includes('已验收'), '必须有「已验收」列')
+    H.expect(text.indexOf('已交付未验收') !== text.indexOf('已验收'), '两列位置必须不同')
+    // 切片落在正确的列里
+    H.expect(text.includes('说完了没验'), 'done 切片应出现在看板上')
+    H.expect(text.includes('验过了'), 'verified 切片应出现在看板上')
+    H.expect(text.includes('验收 老李'), 'verified 卡片应标出验收人')
   })
 
   add('client: 决策卡必须让人点名「批准哪一项」且推荐项能被识别', async () => {

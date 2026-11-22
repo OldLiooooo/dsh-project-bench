@@ -582,6 +582,54 @@ export const gateSubmit = {
 }
 
 /**
+ * weekly_report：生成周报（MVP 验收标准 ⑤）。
+ *
+ * 设计取舍：周报**不是**让模型现写的。它由 host 从项目库渲染，模型只负责转述/摘选。
+ * 理由：设计 §6.2 的原则是「指标必须能从项目文件/会话事件自动生成」；
+ * 让模型每周编一段「本周完成了…」，等于把唯一进度口径交回给自然语言 —— 那正是要消灭的东西。
+ *
+ * mode=preview 只返回内容不写盘（PM 想先看一眼再决定要不要发布）；
+ * mode=write 写到 <root>/.project/exports/weekly.md（走 outbox，可补偿）。
+ */
+export const weeklyReport = {
+  name: 'weekly_report',
+  description: '生成周报（Markdown，可直接贴进 GitHub Issue）。内容全部从项目库自动渲染：进度（唯一口径 = verified）、本期验收数、待决策、阻塞项、本期完成清单。不是模型现写，因此可复核、可重复生成。',
+  parameters: params({
+    mode: S('preview | write（默认 preview：只返回内容，不写盘）'),
+    since: S('本期起始时间（ISO，可选；默认用 period.startedAt，没有则近 7 天）'),
+    title: S('标题（可选，默认「<项目名> 周报 · <周期>」）'),
+  }, []),
+  actors: ['pm'],
+  execute: async function (args, _exec, actor, deps) {
+    const mode = optionalText(args.mode) || 'preview'
+    if (mode !== 'preview' && mode !== 'write') throw fail('INVALID', 'mode 必须是 preview 或 write')
+    const options = { since: optionalText(args.since), title: optionalText(args.title) }
+    if (mode === 'preview') {
+      const content = deps.exporter.renderWeeklyReport(actor.db, options)
+      return {
+        mode: 'preview',
+        content,
+        chars: content.length,
+        note: '未写盘。确认内容后可调 weekly_report({mode:"write"}) 落到 .project/exports/weekly.md。',
+      }
+    }
+    const root = rootOf(actor)
+    const result = deps.exporter.exportWeekly(actor.db, { ...options, root: root })
+    notifyWrite(deps, actor)
+    return {
+      mode: 'write',
+      path: result.relativePath,
+      written: result.written,
+      error: result.error,
+      content: result.content,
+      note: result.written
+        ? '已写入 ' + result.relativePath + '（内容确定性，可重复生成）。可直接复制到 GitHub Issue。'
+        : '写盘失败：' + String(result.error || 'unknown') + '（导出意图已记录，可用 exports/replay 补偿）',
+    }
+  },
+}
+
+/**
  * period_roll：推进项目周期（设计 §5.4 的两周周期 + cooldown）。
  *
  * 为什么需要显式工具而不是日历自动滚动：
@@ -757,5 +805,5 @@ export const docExport = {
 }
 
 export function createPmTools(_ctx, _deps) {
-  return [projectInit, sliceCreate, sliceUpdate, sliceScope, sliceVerify, taskCreate, sessionSpawnTask, sessionSpawnQa, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport, periodRoll]
+  return [projectInit, sliceCreate, sliceUpdate, sliceScope, sliceVerify, taskCreate, sessionSpawnTask, sessionSpawnQa, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport, periodRoll, weeklyReport]
 }

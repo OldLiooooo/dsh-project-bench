@@ -26,6 +26,7 @@ const EXPECTED_TOOLS = [
   'project_init', 'project_status', 'project_recall', 'session_finish_task', 'session_send_task',
   'period_roll', 'session_spawn_qa', 'session_spawn_task', 'session_task_report', 'slice_create',
   'slice_list', 'slice_scope', 'slice_update', 'slice_verify', 'task_create', 'task_list', 'task_update',
+  'weekly_report',
 ]
 
 function createEnv() {
@@ -146,7 +147,7 @@ function assertToolError(promise, code) {
   })
 }
 
-test('工具清单与契约一致（30 个，含 v4 的 slice_scope 与 v5 的 slice_verify/session_spawn_qa/period_roll），且都带 JSON Schema 参数与输出声明', (t) => {
+test('工具清单与契约一致（31 个，含 v4 的 slice_scope 与 v5 的 slice_verify/session_spawn_qa/period_roll/weekly_report），且都带 JSON Schema 参数与输出声明', (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const catalog = toolCatalog(env.ctx, env.deps)
@@ -165,14 +166,14 @@ test('工具清单与契约一致（30 个，含 v4 的 slice_scope 与 v5 的 s
   }
 })
 
-test('when 过滤：PM 看 26 个、任务会话看 15 个、验收会话看 9 个、普通/子 agent 看 0 个', async (t) => {
+test('when 过滤：PM 看 27 个、任务会话看 15 个、验收会话看 9 个、普通/子 agent 看 0 个', async (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const pm = createPm(env)
   const slice = createSlice(env)
   const task = createTaskSession(env, slice)
   const pmVisible = visibleToolNames(env, pm.agent)
-  assert.equal(pmVisible.length, 26)
+  assert.equal(pmVisible.length, 27)
   assert.ok(pmVisible.includes('session_spawn_task'))
   assert.ok(pmVisible.includes('project_status'))
   assert.ok(pmVisible.includes('gate_submit'))
@@ -1266,5 +1267,68 @@ test('闸1: 三种角色（pm/task/qa）的注入都不超预算、都不降级'
     assert.ok(compiled.used <= 2000, spec.roleKind + ' 超 2k 硬上限：' + compiled.used)
     assert.equal(compiled.degraded, false, spec.roleKind + ' 不应降级（角色卡写太长会把每步注入都判降级）')
   }
+})
+
+
+
+// ---------------------------------------------------------------------------
+// MVP ⑤：周报生成器（必须自动生成，不是模型现写）
+// ---------------------------------------------------------------------------
+
+test('MVP⑤ 周报：从项目库自动渲染，含进度/待决策/阻塞，且确定性可重复', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const a = createSlice(env)
+  const b = store.createSlice(env.db, { key: 'slice-blocked', title: '被阻塞的切片' })
+  // a 验收；b 阻塞；再挂一个待决策
+  store.updateSliceStatus(env.db, { id: a.id, status: 'review' })
+  await callTool(env, 'slice_verify', { sliceId: a.id, verifiedBy: '老李', resultSummary: '复跑全绿' }, pm.agent)
+  store.updateSliceStatus(env.db, { id: b.id, status: 'blocked' })
+  await callTool(env, 'decision_create', {
+    title: '要不要延期', question: '延期三天还是砍范围？', options: ['A 延期', 'B 砍范围'],
+    recommended: 'A', deadline: '2026-12-01T18:00:00+08:00', irreversible: true,
+  }, pm.agent)
+
+  const preview = await callTool(env, 'weekly_report', { mode: 'preview' }, pm.agent)
+  assert.equal(preview.mode, 'preview')
+  assert.match(preview.content, /^# /m, '周报必须是 Markdown，有标题')
+  assert.match(preview.content, /进度 \*\*1\/2\*\*（50%）/, '必须含唯一口径进度，实际：' + preview.content.slice(0, 400))
+  assert.match(preview.content, /需要拍板的决策（1）/, '必须列待决策')
+  assert.match(preview.content, /不可逆/, '不可逆决策必须标出来')
+  assert.match(preview.content, /阻塞项（1）/, '必须列阻塞项')
+  assert.match(preview.content, /本期完成（已独立验收）/, '必须列本期完成')
+  assert.match(preview.content, /不是手写/, '必须声明是自动生成的')
+
+  // 确定性：同一状态渲染两次内容一致（否则「可重生成」是空话）
+  const again = await callTool(env, 'weekly_report', { mode: 'preview' }, pm.agent)
+  assert.equal(again.content, preview.content, '同一项目状态下周报内容必须完全一致')
+})
+
+test('MVP⑤ 周报：write 模式落盘到 .project/exports/weekly.md', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  store.updateSliceStatus(env.db, { id: slice.id, status: 'review' })
+  await callTool(env, 'slice_verify', { sliceId: slice.id, verifiedBy: '老李' }, pm.agent)
+  const written = await callTool(env, 'weekly_report', { mode: 'write' }, pm.agent)
+  assert.equal(written.mode, 'write')
+  assert.equal(written.path, '.project/exports/weekly.md')
+  assert.equal(written.written, true, '写盘应成功：' + String(written.error))
+  const { existsSync, readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const file = join(env.root, '.project', 'exports', 'weekly.md')
+  assert.ok(existsSync(file), '文件必须真的落盘：' + file)
+  assert.match(readFileSync(file, 'utf8'), /进度 \*\*1\/1\*\*（100%）/)
+})
+
+test('MVP⑤ 周报：空项目不崩，且明确说「还没有切片」', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const preview = await callTool(env, 'weekly_report', { mode: 'preview' }, pm.agent)
+  assert.match(preview.content, /进度 \*\*0\/0\*\*/)
+  assert.ok(preview.chars > 100)
 })
 

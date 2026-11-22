@@ -98,6 +98,7 @@ window.__ModuleLoader__.load({
 
     const TABS = [
       { id: 'overview', label: 'tabs.overview' },
+      { id: 'board', label: 'tabs.board' },
       { id: 'sessions', label: 'tabs.sessions' },
       { id: 'documents', label: 'tabs.documents' },
       { id: 'decisions', label: 'tabs.decisions' },
@@ -252,6 +253,22 @@ window.__ModuleLoader__.load({
 .wb-doc-block[data-type=hr]{height:1px;background:var(--dsw-alias-border-l1)}
 .wb-doc-filter{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .wb-decision{display:flex;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);padding:12px 14px}
+.wb-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:start}
+.wb-board-col{display:flex;flex-direction:column;gap:6px;min-width:0;padding:8px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}
+.wb-board-col[data-tone=good]{border-color:var(--dsw-alias-state-business-primary)}
+.wb-board-col[data-tone=warn]{border-color:var(--dsw-alias-state-warn-secondary)}
+.wb-board-col[data-tone=bad]{border-color:var(--dsw-alias-state-error-primary)}
+.wb-board-col-head{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.wb-board-col-title{font:var(--dsw-font-xs-strong-13,var(--dsw-font-xs-13));color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-board-col-count{flex:none;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);padding:0 6px;border-radius:var(--dsw-radius-full,999px);background:var(--dsw-alias-bg-layer-2)}
+.wb-board-cards{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.wb-board-card{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;padding:6px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);cursor:pointer}
+.wb-board-card:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.wb-board-card:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.wb-board-card-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-board-card-meta{font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-board-empty{margin:0;padding:8px 0;text-align:center;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-tertiary)}
+.wb-banner-warn{border-color:var(--dsw-alias-state-warn-secondary)}
 .wb-progress{display:flex;flex-direction:column;gap:8px;margin:4px 0 0}
 .wb-progress-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .wb-progress-label{font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-secondary)}
@@ -391,6 +408,19 @@ window.__ModuleLoader__.load({
       'tree.collapse': '收起',
       'tree.truncated': '节点过多，仅显示部分对象（可进入 PM 查询）。',
       'tabs.overview': '概览',
+      'tabs.board': '看板',
+      'board.col.open': '待开始',
+      'board.col.inProgress': '进行中',
+      'board.col.blocked': '阻塞',
+      'board.col.doneUnverified': '已交付未验收',
+      'board.col.inReview': '待验收',
+      'board.col.verified': '已验收',
+      'board.col.closed': '已关闭',
+      'board.colEmpty': '（空）',
+      'board.verifiedBy': '验收 {who}',
+      'board.wipHint': '进行中 {count} 项，超过 4 项时先收尾再加新任务（WIP 提示，不强制拦截）。',
+      'board.unknownStatus': '{count} 个切片的未知状态未入列（状态值不在看板列定义里）。',
+
       'tabs.sessions': '会话',
       'tabs.documents': '文档',
       'tabs.decisions': '决策',
@@ -725,6 +755,19 @@ window.__ModuleLoader__.load({
       'tree.collapse': 'Collapse',
       'tree.truncated': 'Too many nodes; only some objects are shown (ask the PM to query).',
       'tabs.overview': 'Overview',
+      'tabs.board': 'Board',
+      'board.col.open': 'To do',
+      'board.col.inProgress': 'In progress',
+      'board.col.blocked': 'Blocked',
+      'board.col.doneUnverified': 'Done (unverified)',
+      'board.col.inReview': 'In review',
+      'board.col.verified': 'Verified',
+      'board.col.closed': 'Closed',
+      'board.colEmpty': '(empty)',
+      'board.verifiedBy': 'verified by {who}',
+      'board.wipHint': '{count} items in flight — finish some before adding more (hint only, not enforced).',
+      'board.unknownStatus': '{count} slice(s) with unknown status not placed on the board.',
+
       'tabs.sessions': 'Sessions',
       'tabs.documents': 'Documents',
       'tabs.decisions': 'Decisions',
@@ -3030,6 +3073,9 @@ window.__ModuleLoader__.load({
               }, t('panel.header.reconnect')))
           : null
         const activeTab = (() => {
+          if (tab === 'board') {
+            return h(BoardTab, { t, runtime, norm, treeData, maps, selected, onSelectRow: selectRow, project, root, lang })
+          }
           if (tab === 'sessions') {
             return h(SessionsTab, { t, runtime, norm, treeData, maps, selected, onOpenDocument: openDocument, project, root, lang })
           }
@@ -4089,6 +4135,83 @@ window.__ModuleLoader__.load({
     }
 
     /** Timeline view with category/role/stage filters and a refresh that appends newer events. */
+    /**
+     * 看板（MVP 清单：总览 + 看板 + 决策收件箱）。
+     *
+     * 列 = 切片生命周期，但**故意把 done 与 verified 分开**：
+     * 设计 §7.2 的原始看板把 InReview/Verified/Done 混成「待验收/已验证」，
+     * 而这个项目最容易被糊过去的一帧就是「交付方说完了」与「有人验过」的差别。
+     * 所以这里给 6 列，其中「已交付未验收」与「已验收」是两个独立列 —— 后面那一列才是进度。
+     *
+     * WIP 不做强制限制（设计 §7.2 提到 WIP≤团队规模，但团队规模在本插件里没有数据源），
+     * 只在超过 4 个「进行中」时给一行提示，不假装能拦。
+     */
+    function BoardTab(props) {
+      const { t, norm, treeData, onSelectRow, runtime } = props
+      const data = norm || {}
+      const collected = collectTreeData(data.tree || [])
+      const slices = collected.slices.length > 0 ? collected.slices : (treeData && treeData.slices) || []
+      const COLUMNS = [
+        { id: 'open', label: 'board.col.open', statuses: ['open', 'pending'], tone: 'neutral' },
+        { id: 'in_progress', label: 'board.col.inProgress', statuses: ['in_progress', 'active', 'ongoing'], tone: 'accent' },
+        { id: 'blocked', label: 'board.col.blocked', statuses: ['blocked', 'failed'], tone: 'bad' },
+        { id: 'done', label: 'board.col.doneUnverified', statuses: ['done'], tone: 'warn' },
+        { id: 'review', label: 'board.col.inReview', statuses: ['review'], tone: 'accent' },
+        { id: 'verified', label: 'board.col.verified', statuses: ['verified'], tone: 'good' },
+        { id: 'closed', label: 'board.col.closed', statuses: ['archived', 'cut'], tone: 'neutral' },
+      ]
+      const byColumn = new Map(COLUMNS.map((column) => [column.id, []]))
+      const other = []
+      for (const slice of slices) {
+        const status = String((slice && slice.status) || '').toLowerCase()
+        const column = COLUMNS.find((item) => item.statuses.includes(status))
+        if (column) byColumn.get(column.id).push(slice)
+        else other.push(slice)
+      }
+      const wipCount = byColumn.get('in_progress').length + byColumn.get('review').length
+      const openSlice = (slice) => {
+        if (onSelectRow) onSelectRow({ kind: 'slice', slice: slice, stageKey: slice.stageKey })
+      }
+      return h('div', { className: 'wb-stack' },
+        wipCount > 4
+          ? h('div', { className: 'wb-banner wb-banner-warn' },
+              h('span', { className: 'wb-banner-grow' }, t('board.wipHint', { count: String(wipCount) })))
+          : null,
+        h('div', { className: 'wb-board', role: 'list' },
+          COLUMNS.map((column) => {
+            const rows = byColumn.get(column.id)
+            return h('section', { key: column.id, className: 'wb-board-col', 'data-tone': column.tone, role: 'listitem' },
+              h('header', { className: 'wb-board-col-head' },
+                h('span', { className: 'wb-board-col-title' }, t(column.label)),
+                h('span', { className: 'wb-board-col-count' }, String(rows.length)),
+              ),
+              rows.length === 0
+                ? h('p', { className: 'wb-board-empty' }, t('board.colEmpty'))
+                : h('ul', { className: 'wb-board-cards' },
+                    rows.map((slice) => h('li', { key: slice.id || slice.key },
+                      h('button', {
+                        type: 'button', className: 'wb-board-card',
+                        onClick: () => openSlice(slice),
+                        title: slice.title || slice.key,
+                      },
+                        h('span', { className: 'wb-board-card-title' }, slice.title || slice.key || slice.id),
+                        h('span', { className: 'wb-board-card-meta' },
+                          String(slice.ownerRole || '—'),
+                          slice.verifiedBy ? ' · ' + t('board.verifiedBy', { who: String(slice.verifiedBy) }) : '',
+                        ),
+                      ),
+                    )),
+                  ),
+            )
+          }),
+        ),
+        other.length > 0
+          ? h('div', { className: 'wb-banner' },
+              h('span', { className: 'wb-banner-grow' }, t('board.unknownStatus', { count: String(other.length) })))
+          : null,
+      )
+    }
+
     function TimelineTab(props) {
       const { t, actions, hub, norm, maps, root, lang } = props
       const [filters, setFilters] = React.useState({ category: 'all', role: 'all', stage: 'all' })
@@ -4663,6 +4786,7 @@ window.__ModuleLoader__.load({
         PanelMoreMenuItem, DecisionCard, DecisionsTab,
         OverviewTab, NodeDetail, StageList, TreeRow, EventRowItem, SessionsTab,
         DocumentsTab, DocumentPreview, DecisionCard, DecisionsTab, TimelineTab,
+        BoardTab,
       },
     }
 

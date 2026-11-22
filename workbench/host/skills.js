@@ -49,6 +49,22 @@ export const SKILLS = [
     file: 'decision-card.md',
     fallback: '# 决策卡\n\n要素：问题/选项/推荐/后果/不可逆；PM 用 decision_create，门禁用 gate_submit；agent 不得代批。',
   },
+  {
+    name: 'testing-acceptance',
+    description: '独立验收：验收会话的硬边界、开工三步、签字与拒绝的写法（v5 Verified Done）。',
+    file: 'testing-acceptance.md',
+    fallback: '# 独立验收\n\n1) project_brief 读 acceptance 确认「验什么算过」；2) 看交接与证据；3) 复跑命令，别只看结论。'
+      + '过 → evidence_add + slice_verify(verifiedBy)；不过 → 只 evidence_add，不签字。'
+      + '不要用实现会话验收（SELF_VERIFICATION_DENIED），不要直接改状态成 verified（INVALID）。',
+  },
+  {
+    name: 'cycle-retrospective',
+    description: '周期复盘：把本周期事实固定下来（数据自动取，不手填），并推进周期。',
+    file: 'cycle-retrospective.md',
+    fallback: '# 周期复盘\n\n数据从 project_status.progress 与 weekly_report 取，不要自己编数字。'
+      + '四段式：做成了什么（只写 verified）/没做成什么及原因/口径是否可信（done 未验收堆积=验收瓶颈）/下期最多 3 条可验证的规则变更。'
+      + '写完用 period_roll 推进（会把本期验证数定格）。',
+  },
 ]
 
 function loadContent(skill) {

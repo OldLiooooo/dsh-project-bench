@@ -27,6 +27,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fail, projectRootOf, timelineMarkdown } from './db.js'
 import { getDocument, getDocVersion, listDocuments } from './docs.js'
 import { newId, nowIso, sha256 } from './util.js'
+import { renderWeeklyReport } from './report.js'
+
+export { renderWeeklyReport }
 
 export const DEFAULT_EXPORT_MAP = {
   prd: 'product',
@@ -414,6 +417,48 @@ export function exportTimeline(db, input = {}) {
     batchId,
     written: applied.status === 'done',
     error: applied.error,
+  }
+}
+
+/**
+ * 导出周报到 <root>/.project/exports/weekly.md（MVP 验收标准 ⑤：可直接贴进 GitHub Issue）。
+ *
+ * 与 exportTimeline 遵循同一套 outbox 规则（意图先行 + 事务外落盘 + 可补偿），
+ * 因为「写文件」这件事的失败形态是一样的，不该因为文件叫 weekly 就换一套。
+ *
+ * 为什么不默认写进 docs/：周报是**派生视图**（同一状态可重复生成），
+ * 而 docs/ 里放的是需要版本链管理的交付文档。混在一起会让文档版本链长出噪音。
+ * 需要进 Issue 时，由人/PM 复制内容即可 —— 或者 docs/ 里另建一篇 report 文档引用它。
+ */
+export function exportWeekly(db, input = {}) {
+  const root = resolveProjectRoot(db, input.root)
+  const batchId = input.batchId || newId('batch')
+  const content = input.content || renderWeeklyReport(db, input)
+  const hash = sha256(content)
+  const relativePath = '.project/exports/weekly.md'
+  const absolutePath = resolve(root, '.project', 'exports', 'weekly.md')
+  const plan = db.tx(() => {
+    const outboxId = insertOutboxRow(db, batchId, { kind: 'weekly', relativePath, hash })
+    const exportsId = insertExportRow(db, { kind: 'weekly', relativePath, hash, version: null, status: 'pending', batchId })
+    db.appendEvent({
+      kind: 'export/snapshot',
+      payload: { kind: 'weekly', path: relativePath, hash: hash, batchId, outboxId },
+    })
+    return { outboxId, exportsId }
+  })
+  const row = db.db.prepare('SELECT * FROM export_outbox WHERE id = ?').get(plan.outboxId)
+  const applied = applyOutboxRow(db, root, row, content)
+  db.db.prepare('UPDATE exports SET status = ?, content_hash = ?, error = ? WHERE id = ?')
+    .run(applied.status === 'done' ? 'ok' : 'failed', applied.hash ?? hash, applied.error ?? null, plan.exportsId)
+  return {
+    path: absolutePath,
+    relativePath,
+    hash: applied.hash ?? hash,
+    exportsId: plan.exportsId,
+    batchId,
+    written: applied.status === 'done',
+    error: applied.error,
+    content,
   }
 }
 

@@ -9,7 +9,7 @@
   <img alt="DSH >= 0.2.2-rc.1" src="https://img.shields.io/badge/DSH-%E2%89%A5%200.2.2--rc.1-6f42c1">
   <img alt="Node >= 20" src="https://img.shields.io/badge/node-%E2%89%A5%2020-339933?logo=node.js&logoColor=white">
   <img alt="Platform: DSH Desktop / Web" src="https://img.shields.io/badge/platform-DSH%20Desktop%20%7C%20Web-orange">
-  <a href="#-testing"><img alt="Tests: 111 unit + 10 suites" src="https://img.shields.io/badge/tests-111%20unit%20%2B%2010%20suites-brightgreen"></a>
+  <a href="#-testing"><img alt="Tests: 120 unit + 11 suites" src="https://img.shields.io/badge/tests-120%20unit%20%2B%2011%20suites-brightgreen"></a>
 </p>
 
 <p align="left">
@@ -128,7 +128,7 @@ in the workspace's `.project/`; delete it for a complete cleanup (back up `proje
 
 | Path | Contents |
 |---|---|
-| [`workbench/`](workbench/) | **The plugin** — host runtime (32 modules), client bundle (`client.js`, 4.6k lines), `cordis.patch.yml`, 2 3 presets, 7 skill templates, en/zh locales, scripts, tests |
+| [`workbench/`](workbench/) | **The plugin** — host runtime (33 modules), client bundle (`client.js`, 4.6k lines), `cordis.patch.yml`, 3 presets, 9 skill templates, en/zh locales, scripts, tests |
 | [`docs/`](docs/) | Design proposals, architecture blueprints, delivery/acceptance notes, plugin development & publishing guide, research |
 | [`research/`](research/) | Background research material |
 | [`templates/`](templates/) | Plugin skeletons: [`host-bundle/`](templates/host-bundle/) (host-only) and [`ui-decoration/`](templates/ui-decoration/) (with Web UI) |
@@ -163,11 +163,12 @@ export DSH_HOME="$(pwd)/.dshhome"                        # ❌ MSYS pwd → /c/.
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit (111 cases across 6 files) | `node --test --test-isolation=none workbench/tests/unit/` | 111/111 |
+| Unit (120 cases across 6 files) | `node --test --test-isolation=none workbench/tests/unit/` | 120/120 |
 | Doc-count drift guard | `node workbench/scripts/check-doc-counts.mjs` | PASS (8 canonical claims) |
+| Gate 2: real-project flow | `node workbench/tests/probes/gate2-real-project.mjs` | 26/26 |
 | 14-step business replay | `node workbench/tests/e2e/replay-14-steps.mjs --strict` | 17/17 |
 | Negative / security | `node workbench/tests/e2e/negative.test.mjs` | 10/10 |
-| UI contract | `node workbench/tests/e2e/ui-client.test.mjs` | 8/8 |
+| UI contract | `node workbench/tests/e2e/ui-client.test.mjs` | 9/9 |
 | Instance scripts | `node workbench/tests/e2e/dev-instance.test.mjs` | 8/8 |
 | Real checker probes | `node workbench/tests/probes/gate-real-checkers.mjs` | 3/3 |
 | Governance end-to-end (real lumio copy) | `node workbench/tests/probes/governance-e2e.mjs` | 26/26 · 1 skipped (sandbox mode) |
@@ -199,13 +200,18 @@ This repo doubles as a working reference. The short version (full details in the
 
 ### Status & roadmap
 
-**Governance core is complete and the PM layer now has its denominators (schema v5).** The 2026-11-21
-audit ([delivery audit](docs/implementation/delivery-audit-2026-11-21.zh.md)) initially scored progress
-metrics, independent verification and cycle control at 0–10%; **all seven backlog items (B1–B7) have since
-landed**: `verified` is a first-class slice state with a signed verifier and three guards (unique write path,
-builder≠verifier, DB triggers), an independent `project-qa` session type can't write anything but evidence,
-progress is computed from `verified` only, and cycles are explicit. Still missing: risk/issue/assumption
-ledgers, cycle circuit breaker, and the burndown/metrics views — see [BACKLOG](docs/implementation/BACKLOG.zh.md).
+**The MVP checklist is complete (schema v5).** Authoritative store, rejectable state machine,
+machine-sourced gate evidence, human-only approval, verified-only progress, independent QA sessions,
+explicit cycles, the board view, the auto-generated weekly report and 9 SOP skills are all in place —
+and the whole flow has been run end-to-end on a real repo (`probes/gate2-real-project.mjs`, 26/26:
+progress 0%→100%, gate rejected by a red checker, then fixed and re-submitted green).
+
+Design §10.1 lists five MVP acceptance criteria: ① real-project flow, ③ evidence drill-down, ④ restart
+recovery are **verified**; ② (≤5 interruptions/week) needs a human using it for a while; ⑤ (weekly report
+pasteable into an Issue) is now **implemented**.
+
+Still missing (post-MVP, in [BACKLOG](docs/implementation/BACKLOG.zh.md)): risk/issue/assumption ledgers,
+cycle circuit breaker, burndown/metrics views, delivery chain.
 
 Design material is kept as-is to serve as the blueprint and background. Not yet published to npm or a
 market index — this repository currently distributes source plus a local bundle.
@@ -311,7 +317,7 @@ key 从 credentials refs 读取，绝不硬编码。
 
 | 路径 | 内容 |
 |---|---|
-| [`workbench/`](workbench/) | **插件本体** —— Host 运行时（32 个模块）、Client bundle（`client.js`，4.6k 行）、`cordis.patch.yml`、3 个 preset、7 个技能模板、中英 locale、脚本、测试 |
+| [`workbench/`](workbench/) | **插件本体** —— Host 运行时（33 个模块）、Client bundle（`client.js`，4.6k 行）、`cordis.patch.yml`、3 个 preset、9 个技能模板、中英 locale、脚本、测试 |
 | [`docs/`](docs/) | 设计提案、架构施工图、交付/验收说明、插件开发与发布指南、研究资料 |
 | [`research/`](research/) | 背景研究材料 |
 | [`templates/`](templates/) | 插件骨架：[`host-bundle/`](templates/host-bundle/)（纯 Host）与 [`ui-decoration/`](templates/ui-decoration/)（带 Web UI） |
@@ -345,11 +351,12 @@ export DSH_HOME="$(pwd)/.dshhome"                        # ❌ MSYS pwd 给 /c/.
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| 单测（6 个文件 111 例） | `node --test --test-isolation=none workbench/tests/unit/` | **111/111** |
+| 单测（6 个文件 120 例） | `node --test --test-isolation=none workbench/tests/unit/` | **120/120** |
 | 文档计数防漂移 | `node workbench/scripts/check-doc-counts.mjs` | PASS（8 条规范句） |
+| **闸2：真实项目全流程** | `node workbench/tests/probes/gate2-real-project.mjs` | **26/26** |
 | 14 步业务预演回放 | `node workbench/tests/e2e/replay-14-steps.mjs --strict` | 17/17 |
 | 负向 / 安全 | `node workbench/tests/e2e/negative.test.mjs` | 10/10 |
-| UI 契约 | `node workbench/tests/e2e/ui-client.test.mjs` | 8/8 |
+| UI 契约 | `node workbench/tests/e2e/ui-client.test.mjs` | 9/9 |
 | 实例脚本 | `node workbench/tests/e2e/dev-instance.test.mjs` | 8/8 |
 | 真实判据探针 | `node workbench/tests/probes/gate-real-checkers.mjs` | 3/3 |
 | 治理端到端（真实 lumio 副本） | `node workbench/tests/probes/governance-e2e.mjs` | 26/26 · 1 跳过（沙箱模式） |
@@ -380,12 +387,16 @@ export DSH_HOME="$(pwd)/.dshhome"                        # ❌ MSYS pwd 给 /c/.
 
 ### 现状与后续
 
-**治理内核已完成，PM 层现在也有了它的分母（schema v5）。** 2026-11-21 的核对
-（[交付审计](docs/implementation/delivery-audit-2026-11-21.zh.md)）一度把进度度量、独立验收、周期控制
-打到 0–10%；**此后 B1–B7 七项已全部落地**：`verified` 成为一等切片状态（签名验收人 + 三道闸：
-唯一写入路径、建造者不验收、DB 触发器兜底），独立的 `project-qa` 验收会话除证据外什么都写不了，
-进度只认 `verified`，周期推进是显式动作。仍缺：风险/问题/假设三本账、周期熔断、燃起图与指标页
-—— 见 [BACKLOG](docs/implementation/BACKLOG.zh.md)。
+**MVP 清单已完成（schema v5）。** 权威源、可拒绝状态机、判据来自机器、人批准唯一出口、
+只认 verified 的进度、独立验收会话、显式周期、看板视图、自动生成的周报、9 个 SOP 技能 —— 全部到位，
+并且在真实仓库上端到端跑通过（`probes/gate2-real-project.mjs`，26/26：
+进度 0%→100%，门禁被判据红灯拒绝、修好后重提转绿）。
+
+设计 §10.1 的五条 MVP 验收标准：① 真实项目流程、③ 证据可下钻、④ 重启恢复 —— **已验证**；
+② （每周打断 ≤5 次）需要真人用一段时间；⑤ （周报可贴 Issue）**已实现**。
+
+仍缺（属 MVP 之后，见 [BACKLOG](docs/implementation/BACKLOG.zh.md)）：风险/问题/假设三本账、
+周期熔断、燃起图与指标页、交付链。
 
 设计资料保持原样，作为施工图与背景。目前尚未发布到 npm 或市场索引 —— 本仓库当前分发源码 + 本地 bundle。
 
