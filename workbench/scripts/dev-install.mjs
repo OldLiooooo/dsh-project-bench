@@ -28,7 +28,7 @@ export const DEFAULT_PROFILE = 'web'
 export const DEFAULT_EXE = process.env.DSH_DESKTOP_EXE || 'C:/Users/oldap/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe'
 export const DEFAULT_CLI = process.env.DSH_DESKTOP_CLI || 'C:/Users/oldap/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'
 
-const REQUIRED_BUNDLE_FILES = ['index.js', 'client.js', 'cordis.patch.yml', 'locale/zh.json', 'locale/en.json', 'icon.svg', 'package.json', 'host/db.js']
+const REQUIRED_BUNDLE_FILES = ['index.js', 'client.js', 'cordis.patch.yml', 'locale/zh.json', 'locale/en.json', 'icon.svg', 'package.json', 'host/db.js', 'roles/pm.md', 'roles/qa.md', 'roles/coder.md', 'roles/research.md']
 const RESERVED_PROFILES = new Set(['desktop'])
 
 export class InstallError extends Error {

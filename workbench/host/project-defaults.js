@@ -12,7 +12,28 @@ export const STAGE_TEMPLATE = [
   { key: 'S7', name: '复盘', gate: 'G7', deliverableTypes: ['retro'] },
 ]
 
-export const ROLE_WORDS = ['产品', 'UX', '架构', '码农', '测试', '发布', '复盘']
+// 可派任务的角色词表（命名 角色-切片-动作 的第一段）。
+//
+// 「调研」在 v6 才加进来，原因见 docs/workbench-design-logic.zh.md §4.7：
+// 设计原文把「调研/起草/评审」写成任务会话的子 agent 临时工，但角色词表里没有它，
+// 于是 PM 想调查时**没有任何合法动作** —— 它不能派单（角色未知直接 INVALID），
+// 也不能拉子 agent（PM preset 故意不挂 delegation），只能自己 read/grep（46% 的工具调用）。
+// 把调研变成一个正式角色，PM 才有「派一个调研会话」这条路。
+export const ROLE_WORDS = ['产品', 'UX', '架构', '码农', '测试', '发布', '复盘', '调研']
+
+/**
+ * 只读角色：派单时不占切片租约、不能用 session_finish_task 推进切片状态。
+ *
+ * 为什么「调研」必须不占租约：租约是**写作用域锁**（同一切片同时只有一个写者）。
+ * 调研是只读动作，让它持租会把同切片的实现会话挡在门外 —— 那不是保护，是拿锁当排队用。
+ * 它也不能用 session_finish_task：那个工具会把切片推到 review，而调研并不产出切片交付物。
+ */
+export const READONLY_ROLES = ['调研']
+
+/** 这个角色词是不是只读角色（不占租约、不收工推进切片）。 */
+export function isReadonlyRole(word) {
+  return typeof word === 'string' && READONLY_ROLES.includes(word)
+}
 
 export function defaultExportMap() {
   return {
