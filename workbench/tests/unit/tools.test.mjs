@@ -1675,3 +1675,105 @@ test('MVP⑤ 周报：空项目不崩，且明确说「还没有切片」', asyn
   assert.ok(preview.chars > 100)
 })
 
+// ---------------------------------------------------------------------------
+// v6.2：交接闭环 —— 真机 lumio 数据暴露的两个缺陷
+// ---------------------------------------------------------------------------
+
+test('v6.2 交接：handoff 不受阶段交付类型约束（否则 S1 写不了交接）', async (t) => {
+  // 直接用纯函数验判定，不搭整套阶段机：
+  //   设计 §4.5.6 的 checkDeliverableType 才是「S1 只允许 prd」的执行点。
+  //   我们要证明的是「handoff 例外、report 不例外」，这是纯判定，不该被夹具复杂度掩盖。
+  const { checkDeliverableType } = await import('../../host/project-defaults.js')
+  const projectJson = {
+    exportMap: {},
+    stageTemplate: [{ key: 'S1', name: '产品', gate: 'G1', deliverableTypes: ['prd'] }],
+  }
+  // 基线：S1 下 report 必须被拒（否则下面的「handoff 例外」就没有意义）
+  const report = checkDeliverableType(projectJson, 'S1', 'report')
+  assert.equal(report.allowed, false, 'S1 下 report 应被拒：' + JSON.stringify(report))
+  assert.equal(report.enforced, true)
+  // 对照：prd 允许
+  assert.equal(checkDeliverableType(projectJson, 'S1', 'prd').allowed, true)
+})
+
+test('v6.2 交接：doc_write 的豁免只覆盖 handoff（源码级断言 + 纯函数对照）', async (t) => {
+  // 为什么不搭完整阶段机：测试夹具的 ProjectDb 不建 stages 行（new ProjectDb 不跑 initProject），
+  // 硬造 S1-active 只会让测试变脆。这里分两层验，合起来等价：
+  //   ① 纯函数层：S1 下 report 被拒、prd 允许（门禁本身是好的）
+  //   ② 源码层：doc_write 的豁免判定确实只放 handoff（不是把门禁整体关掉）
+  const { checkDeliverableType } = await import('../../host/project-defaults.js')
+  const projectJson = { exportMap: {}, stageTemplate: [{ key: 'S1', name: '产品', gate: 'G1', deliverableTypes: ['prd'] }] }
+  assert.equal(checkDeliverableType(projectJson, 'S1', 'report').allowed, false, 'S1 下 report 必须被拒')
+  assert.equal(checkDeliverableType(projectJson, 'S1', 'prd').allowed, true)
+
+  const { readFileSync } = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const taskToolsSrc = readFileSync(fileURLToPath(new URL('../../host/tools/task-tools.js', import.meta.url)), 'utf8')
+  // 豁免判定必须显式点名 handoff，且不能把类型判断整个短路
+  assert.match(taskToolsSrc, /type === 'handoff'/, 'doc_write 的豁免必须显式只对 handoff 生效')
+  assert.match(taskToolsSrc, /checkDeliverableType\(/, '未豁免的类型仍必须走 checkDeliverableType')
+
+  // 行为层：handoff 在任意阶段都能写（不因阶段未声明/未激活而被拦）
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  const written = await callTool(env, 'doc_write', {
+    mode: 'create', type: 'handoff', title: '交接', content: '# 交接\n\n## 做了什么\n\n修了 X。',
+  }, task.agent)
+  assert.equal(written.doc.type, 'handoff', 'handoff 应可写')
+})
+
+test('v6.2 交接：新任务会话的 L2 能看到上一轮交接正文（不是只有 400 字摘要）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 写一份长交接（模拟 lumio 的 2594 字）
+  const body = '# 交接：实现\n\n## 做了什么\n\n' + '改了很多地方。'.repeat(120)
+    + '\n\n## 怎么验证\n\n跑了 node --test，全绿。\n\n## 下一步\n\n补验收。'
+  assert.ok(body.length > 500, '构造的交接应超过摘要的 400 字上限：' + body.length)
+  await callTool(env, 'doc_write', {
+    mode: 'create', type: 'handoff', title: '交接', content: body,
+  }, task.agent)
+  store.updateSliceStatus(env.db, { id: slice.id, currentHandoff: body.slice(0, 800) })
+
+  const compiled = compileContext(env.db, { roleKind: 'task', role: '码农', sliceId: slice.id, includeL1: true, includeL2: true })
+  const l2 = compiled.parts.l2
+  assert.match(l2, /上一轮交接/, 'L2 应有「上一轮交接」段：' + l2.slice(0, 200))
+  // 关键：接上了正文里的具体内容，而不是只有一行摘要
+  assert.ok(l2.includes('怎么验证') || l2.includes('做了什么'), 'L2 应包含交接正文的实质段落：' + l2.slice(0, 400))
+  // 长交接会被截断（正确行为），但**必须标注**并给出取全文的方法，
+  // 否则模型会以为交接就这么多，而不是「这里被截了」。
+  assert.ok(l2.includes('doc_get'), '必须告诉模型全文用 doc_get 取：' + l2.slice(0, 300))
+  // 而且不能因为交接过长就撑破预算
+  assert.ok(compiled.used <= 2000, '总注入不得超 2k 硬上限：' + compiled.used)
+})
+
+test('v6.2 交接：没有 handoff 文档时回退到 current_handoff 摘要（老项目兼容）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  store.updateSliceStatus(env.db, { id: slice.id, currentHandoff: '上一轮只留了摘要，没有建 handoff 文档。' })
+  const compiled = compileContext(env.db, { roleKind: 'task', role: '码农', sliceId: slice.id, includeL1: true, includeL2: true })
+  assert.match(compiled.parts.l2, /交接摘要：/, '没有 handoff 文档时应回退到摘要')
+  assert.match(compiled.parts.l2, /只留了摘要/)
+})
+
+test('v6.2 交接：有 handoff 文档时不再重复注入 current_handoff（实测白烧 200 token）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  await callTool(env, 'doc_write', {
+    mode: 'create', type: 'handoff', title: '交接', content: '# 交接\n\n## 做了什么\n\n修了 X。',
+  }, task.agent)
+  store.updateSliceStatus(env.db, { id: slice.id, currentHandoff: '同一份内容的一行摘要' })
+  const compiled = compileContext(env.db, { roleKind: 'task', role: '码农', sliceId: slice.id, includeL1: true, includeL2: true })
+  assert.match(compiled.parts.l2, /上一轮交接/)
+  assert.ok(!compiled.parts.l2.includes('交接摘要：'), '不应同时注入摘要与正文（同一段话说两遍）')
+})

@@ -143,6 +143,64 @@ function documentRows(db, sliceId) {
   )
 }
 
+/**
+ * 取本切片最新一版 handoff 文档的正文节选（按段落边界截断）。
+ *
+ * 只取 handoff 类文档：PRD/ADR 的正文不该进 2k 预算（那是 doc_get 的事），
+ * 而交接是「下一个人接手必须知道的事」，属于 L2 该付的预算。
+ * @returns {string} 空串表示没有可用交接
+ */
+function latestHandoffPreview(db, sliceId, maxChars) {
+  if (!sliceId) return ''
+  const doc = safeQuery(
+    () => db.db.prepare("SELECT id, current_version FROM documents WHERE project_id = ? AND slice_id = ? AND type = 'handoff' AND current_version > 0 ORDER BY updated_at DESC LIMIT 1")
+      .get(db.projectId, sliceId),
+    undefined,
+  )
+  if (!doc) return ''
+  const row = safeQuery(
+    () => db.db.prepare('SELECT content FROM doc_versions WHERE document_id = ? AND version = ? LIMIT 1').get(doc.id, doc.current_version),
+    undefined,
+  )
+  const content = row && typeof row.content === 'string' ? row.content : ''
+  if (!content.trim()) return ''
+  const limit = Math.max(200, Number(maxChars) || 1200)
+  if (content.length <= limit) return content.trim()
+  // 按段落边界截，避免给出半句话；标题行保留（它说明这一轮做了什么）
+  // 按二级标题切段，但**只有标题行的段要并进后一段**：
+  // 否则 "# 交接：实现" 会独占一个极短的段，导致预算全花在标题上、真正正文被挤掉（实测踩到）。
+  const blocks = []
+  let pendingHeading = ''
+  for (const block of content.split(/\n(?=##\s)/)) {
+    const text = block.trim()
+    if (!text) continue
+    const isBareHeading = /^#{1,6}\s[^\n]*$/.test(text)
+    if (isBareHeading) {
+      pendingHeading = pendingHeading ? pendingHeading + '\n' + text : text
+      continue
+    }
+    blocks.push(pendingHeading ? pendingHeading + '\n' + text : text)
+    pendingHeading = ''
+  }
+  if (pendingHeading) blocks.push(pendingHeading)
+  const out = []
+  let used = 0
+  for (const block of blocks) {
+    const text = block.trim()
+    if (!text) continue
+    if (used + text.length > limit && out.length > 0) break
+    out.push(text.length > limit - used ? text.slice(0, limit - used) : text)
+    used += Math.min(text.length, limit - used)
+    if (used >= limit) break
+  }
+  const joined = out.join('\n').trim()
+  if (joined.length >= content.trim().length) return joined
+  // 截断标记必须放在**开头**：这个预览后面还会被 compileContext 按 2k 预算再裁一次
+  // （实测 L2 已到 900 token 上限时，尾部整段会被砍掉），标记写在尾部等于没写 ——
+  // 模型会以为交接就这么短，而不是「这里被截了、全文要 doc_get」。
+  return '（交接正文已截断，以下为节选；全文用 doc_get 取）\n' + joined
+}
+
 function docSummaryLine(db, doc) {
   const row = safeQuery(
     () => db.db.prepare('SELECT content FROM doc_versions WHERE document_id = ? AND version = ? LIMIT 1').get(doc.id, doc.current_version),
@@ -236,7 +294,25 @@ export function buildL2(db, options = {}) {
   const slice = sliceRow(db, sliceId)
   if (!slice) return '【工作台 L2】当前切片不存在（id=' + sliceId + '）'
   lines.push('【工作台 L2】切片：' + textOf(slice.key) + ' ' + textOf(slice.title) + '｜状态 ' + textOf(slice.status) + '｜owner ' + textOf(slice.owner_role || '-'))
-  if (slice.current_handoff) lines.push('交接摘要：' + oneLine(slice.current_handoff, 400))
+  // 交接：优先注入 handoff 文档的正文节选，而不是 slices.current_handoff 那一行摘要。
+  //
+  // 为什么换：v6.1 实测 lumio 的最新交接 2594 字，原来只注入 current_handoff 的 400 字，丢 85%。
+  // 新派的任务会话于是「不知道上一轮做到哪、为什么停」，只能重新查一遍 ——
+  // 这是「同一个切片反复派活」的真实成本来源。
+  //
+  // 为什么**不**两个都注入：current_handoff 在实践中往往就是那份交接的开头
+  // （lumio 的 slice 摘要是 doc_write 被门禁拒绝后的兜底），两份一起给等于同一段话说两遍，
+  // 实测白烧 405 字符（≈200 token），把 L2 挤出预算并触发降级。
+  // 兜底：没有 handoff 文档时才退回摘要（老项目/早期切片仍在用 current_handoff）。
+  // 700 字（不是 900）：L2 的总预算是 900 token，而 CJK 大约 1 字 1 token。
+  // 留出切片行/验收/文档摘要的位置，否则预览会独占预算、把别的段挤掉。
+  const handoffPreview = latestHandoffPreview(db, sliceId, 700)
+  if (handoffPreview) {
+    lines.push('上一轮交接（节选，全文用 doc_get 取）：')
+    for (const line of handoffPreview.split('\n')) lines.push(line)
+  } else if (slice.current_handoff) {
+    lines.push('交接摘要：' + oneLine(slice.current_handoff, 400))
+  }
   const sliceAcceptance = acceptanceText(slice)
   if (sliceAcceptance) lines.push('切片验收：' + sliceAcceptance)
   const task = taskRow(db, options.taskId)

@@ -135,10 +135,17 @@ export const docWrite = {
       // 只拦「新建文档」：给已有文档追加新版本时类型已经定了，再拦只会把正常返工卡死。
       const stageRow = currentStageOf(deps, db)
       const stageKey = stageRow ? stageRow.key : undefined
-      // 调研报告不参与阶段交付物校验：它不是本阶段的交付物，而是回答 PM 问题的调查结论，
-      // 会横跨多个阶段（S1 只允许 prd，但调研当然可以在 S1 写 report）。
-      const policyCheck = isReadonlyRole(actor.role)
-        ? { allowed: true, enforced: false, reason: '只读角色（调研）的报告不受阶段交付类型约束' }
+      // 两类文档不参与阶段交付物校验：
+      //
+      // ① handoff（交接）—— 每个任务会话收工都要交交接，它不属于「本阶段要产出的交付物」。
+      //    真实事故（lumio，2026-11-23）：S1 只允许 prd，于是架构会话的 doc_write(type:handoff)
+      //    被 STAGE_DELIVERABLE_NOT_ALLOWED 拒掉，交接正文只能塞进 slices.current_handoff 字段，
+      //    而那个字段是给「摘要」用的（写入时 slice(0,800)，L2 注入时再截到 400）。
+      //    结果：2594 字的交接正文，下一个会话只看到 400 字。
+      // ② report（只读角色的调研报告）—— 回答 PM 的问题，会横跨多个阶段。
+      const exemptType = type === 'handoff' || (isReadonlyRole(actor.role) && type === 'report')
+      const policyCheck = exemptType
+        ? { allowed: true, enforced: false, reason: type === 'handoff' ? '交接文档不受阶段交付类型约束' : '调研报告不受阶段交付类型约束' }
         : checkDeliverableType(projectJsonOf(deps, actor), stageKey, type)
       if (!policyCheck.allowed) {
         throw fail('STAGE_DELIVERABLE_NOT_ALLOWED', policyCheck.reason, {
