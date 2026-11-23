@@ -259,7 +259,7 @@ spawn 时把当次 epoch 写进 `sessions.context.fenceEpoch`，写路径比对�
 | 层 | 预算 | 内容 | 时机 |
 |---|---|---|---|
 | L0 | ≤400 | 项目/阶段/角色/待决策数 | **每步** |
-| L1 | ≤300 | 角色卡 | 首步、切切片 |
+| L1 | ≤300 | 角色卡（外置 `workbench/roles/*.md`，9 张） | 首步、切切片 |
 | L2 | ≤900 | 切片简报 | 首步、切切片 |
 
 **合计 1600**，**硬上限 2000**。中间 400 的差值是「工具结果可以用」的空间，**不是第四层**。
@@ -366,8 +366,15 @@ Lease (切片维度写锁)
 
 ### 3.4 角色与技能
 
-**7 个任务角色**（🟦 `roles.js`）：产品 / UX / 架构 / 码农 / 测试 / 发布 / 复盘
-每个角色一张卡：`title / stage / reads / writes / start / finish / guardrails`，作为 L1 注入。
+**10 张角色卡**（🟦 `workbench/roles/*.md`，一角色一个文件）：PM / QA / 产品 / UX / 架构 / 码农 / 测试 / 发布 / 复盘 / 调研（v6）
+每张卡 frontmatter 带 `word / title / stage`，正文六节：`职责 / 读 / 写 / 开工 / 收工 / 红线`，作为 L1 注入。
+
+> **外置的理由**：改一句角色卡不该发版。但**外置的只是文案**——
+> 「建造者不验收」这类约束仍然只由代码执行（工具 actors、写作用域、租约、verifySlice 三道闸），
+> 因为**提示词不算约束**（§8 第 1 条）。把 coder.md 里「只改本切片文件」删掉，码农照样被租约拦住。
+>
+> 读文件失败时回退 `host/roles.js` 的 `FALLBACK_CARDS`（宁可旧文案，绝不空串——
+> v5 的 qa 空角色卡事故就是这么来的）。两份一致性由 `scripts/check-role-cards.mjs` 守。
 
 **9 个技能模板**（🟦 `workbench/skills/*.md`）：
 `requirement-grooming` `prd-writing` `adr-writing` `implementation-execution` `testing-verification`
@@ -427,8 +434,8 @@ stages     pending / active / done / retired
           任务会话（preset: project-task，命名 角色-切片-动作）
 
 🟦 能力层：31 个工具
-   PM 独有 14 │ 双端共享 11 │ 任务独有 4 │ 验收(qa) 独有 1
-   → PM 可见 26，任务可见 15，验收可见 9，普通会话/子 agent 可见 0
+   PM 独有 15 │ 双端共享 13 │ 任务独有 3 │ 验收(qa) 独有 0
+   → PM 可见 27，任务可见 15，验收可见 9，调研（只读角色）同任务面，普通会话/子 agent 可见 0
 
 🟦 领域层
    store / docs / leases / export / import
@@ -446,16 +453,16 @@ stages     pending / active / done / retired
 
 ### 4.1 工具分配（v1.0 写的「22 + 15 = 37」是误导）
 
-**v5 总数 30**（v4 为 27，v5 新增 `slice_verify` / `session_spawn_qa` / `period_roll`）：
+**v6 总数 31**（v4 为 27，v5 加 3，v6 加 1 `file_index`）：
 
 | 类别 | 数量 | 举例 |
 |---|---|---|
-| PM 独有 | 14 | `gate_submit` `session_spawn_task` `slice_create` `decision_create` `project_init` `slice_scope`(v4) `session_spawn_qa`(v5) `period_roll`(v5) |
-| 双端共享 | 11 | `project_status` `doc_get` `slice_update` `artifact_add` `doc_freeze` |
-| 验收独有 | 1 | `slice_verify`（PM 与 qa 都能调；**任务会话不能**） |
-| 任务独有 | 4 | `doc_write` `evidence_add` `session_finish_task` `session_task_report` |
+| PM 独有 | 15 | `gate_submit` `session_spawn_task` `slice_create` `decision_create` `project_init` `slice_scope`(v4) `session_spawn_qa`(v5) `period_roll`(v5) `file_index` |
+| 双端共享 | 13 | `project_status` `doc_get` `slice_update` `artifact_add` `doc_freeze` `slice_verify`(pm+qa) `evidence_add`(task+qa) |
+| 验收独有 | 0 | `slice_verify` 是 pm+qa 共享（**任务会话不能调**） |
+| 任务独有 | 3 | `doc_write` `session_finish_task` `session_task_report` |
 
-> **PM 可见 26，任务可见 15，验收（qa）可见 9**。v1.0 的「22 + 15 = 37 ≠ 26」是因为共享的 11 个被算了两遍。
+> **PM 可见 27，任务可见 15，验收（qa）可见 9**。v1.0 的「22 + 15 = 37 ≠ 26」是因为共享的工具被算了两遍。
 >
 > v5 三个新工具的共同点：**它们都是「不能顺手做」的动作**，所以从状态更新里拆出来单独成工具 ——
 > 验收要有签名人与建造者校验（`slice_verify`）、拉起验收会话不占租约（`session_spawn_qa`）、
@@ -596,6 +603,43 @@ WIP 只提示不强制（设计提到「进行中 ≤ 团队规模」，但团�
 
 ---
 
+
+### 4.7 v6：调研角色 —— 把「调查」从 PM 手里收走
+
+这是**机制缺口**，不是提示词问题。
+
+**现象（实测，lumio 真项目）**：PM 会话 187 次工具调用里，`read`/`glob`/`grep` 占 **86 次（46%）**，
+而真正的派活（`session_spawn_task`）只有 19 次；9 个任务会话拉子 agent **0 次**。
+
+**根因**：设计原文（架构 §6.1）把「临时调研」写成任务会话的子 agent 的活
+（`子 agent｜临时调研/起草/评审/测试执行`），但：
+
+| 缺什么 | 后果 |
+|---|---|
+| `ROLE_WORDS` 里没有「调研」 | PM 想派单 → `session_spawn_task` 直接 `INVALID`（角色未知） |
+| PM preset 不挂 `delegation` | PM 也不能自己拉子 agent |
+| 任务角色卡的开工/收工没有「派临时工」这一步 | 任务会话也不会派 → 第三层整层空转 |
+
+三缺一凑成一个死结：**PM 只有一个合法动作可用 —— 自己读。** 46% 的调用占比不是模型偷懒，是制度逼出来的。
+
+**v6 的解法（三层都在工具面，不在提示词）**：
+
+| 做法 | 落地 | 为什么必须这样 |
+|---|---|---|
+| 加第 8 个角色「调研」 | `ROLE_WORDS` + `roles/research.md` + `FALLBACK_CARDS` | 让「派一个调研」成为合法动作 |
+| 调研走独立 preset `project-research` | `presetForRole(role)` 决定 activation 的 `agentPreset` | preset 是工具面的硬边界：调研会话**没有** write/edit/applyPatch |
+| 调研**不占租约** | `spawnTaskSession` 里 `isReadonlyRole` 跳过 `acquireLease` | 租约是**写者锁**，不是排队号。让只读调研持租会把同切片实现会话挡在门外 |
+| 调研**不能** `session_finish_task` | 工具里对只读角色抛 `PERMISSION_DENIED` | 那个工具会把切片推到 review；调研不产出切片交付物 |
+| 调研交结果 = `session_task_report`（即收工） | report 路径对只读角色调 `endSession` | 否则留一条永远 active 的会话，同(切片,角色)唯一性会挡住下一次调研 |
+| **PM 移除 `tool-fs` / `tool-fs-search`** | `cordis.patch.yml` 里整行删除 | 设计原则 1：提示词不算约束。角色卡「读」写的是 project_*，工具面却给了 fs —— 最后是工具面赢 |
+
+**代价（如实写）**：PM 现在看不到工作区文件。它要回答「仓库长什么样」只能派调研会话；
+这是设计原意（调查交给子会话），但对 PM 来说确实少了一个能力，而且这一步有额外延迟。
+不是没有替代：`project_status`/`brief`/`recall`/`doc_get`/`timeline` 仍能回答「项目里有什么、到哪了」。
+
+**守门**：`tests/unit/presets.test.mjs`（PM 不得挂 fs/bash、调研开关必须显式 false）；
+`tools.test.mjs` 的 4 个 v6 用例（不占租约 / 写者仍占 / 不能收工推进 / report 即收工）。
+
 ## 5. 关键流程
 
 ### 5.1 用户提需求 → PM 拆活 → 任务执行
@@ -734,7 +778,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 判据隔离不是安全边界 | 恶意判据仍可读宿主文件（同进程空间，`spawn` EPERM 使进程级隔离不可用） | 中（已在 ADR 明写） |
 | 多人身份不能**强制**分离 | 能追责、不能阻止同人既提又批；无 RBAC | 中 |
-| 65 个空 catch 仍在（共 183 个 catch，2026-11-22 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| 66 个空 catch 仍在（共 185 个 catch，2026-11-23 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
 | ~~`period` 元数据从未写入~~ | **v5 已修**：`period_roll` 显式推进并写 meta + `period/roll` 事件；不做日历自动滚动（跨零点归属会变成猜） | — |
 | ~~无周报生成~~ | **v5 已修**：`weekly_report` 从项目库自动渲染（进度/待决策/阻塞/本期完成），确定性可重复，可直接贴 GitHub Issue | — |
 | ~~`deliverableTypes` 只写不读~~ | **v5 已修**：`doc_write` 新建文档时按阶段校验（`STAGE_DELIVERABLE_NOT_ALLOWED`）；只拦新建不拦追加 | — |

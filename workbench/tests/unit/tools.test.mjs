@@ -29,6 +29,27 @@ const EXPECTED_TOOLS = [
   'weekly_report',
 ]
 
+/**
+ * 校验一个入参是否是 DSH 真正接受的 SubagentActivationSpec。
+ * 契约来源：@deepseek-ai/dsh-subagent 0.2.2-rc.5 lib/types/index.js 的
+ *   SubagentActivationSpec extends Omit<SubagentStartRequest,'label'|'signal'>
+ *   { provider, label, signal, delivery, childId?, name? }
+ * 其中 SubagentStartRequest = { cwd?, agentPreset?, label?, prompt, parent, signal, agentOptions?, outputSchema?, maxDepth? }。
+ * 关键点：prompt / parent 是**顶层**字段，不存在 request 包装层。
+ */
+function assertSubagentActivationSpec(spec) {
+  assert.ok(spec && typeof spec === 'object', 'startActivation 必须收到 spec 对象')
+  if (spec.request !== undefined) {
+    throw new Error('startActivation 不能收到 request 包装层：prompt/parent/agentPreset 必须是顶层字段（DSH 会读 spec.parent，包装后为 undefined）')
+  }
+  assert.equal(typeof spec.provider, 'string', 'spec.provider 必填')
+  assert.equal(typeof spec.label, 'string', 'spec.label 必填')
+  assert.ok(spec.signal instanceof AbortSignal || (spec.signal && typeof spec.signal.addEventListener === 'function'), 'spec.signal 必填')
+  assert.ok(spec.delivery === 'parent' || spec.delivery === 'caller', 'spec.delivery 必须是 parent/caller')
+  assert.ok(Array.isArray(spec.prompt) && spec.prompt.length > 0, 'spec.prompt 必须是非空内容块数组')
+  assert.ok(spec.parent && spec.parent.session && typeof spec.parent.session.id === 'string', 'spec.parent 必须是带 session.id 的 Agent')
+}
+
 function createEnv() {
   const root = mkdtempSync(join(HERE, '.tmp-'))
   const db = new ProjectDb(join(root, '.project', 'project.db'), { projectId: 'proj-test', projectName: '支付退款', root })
@@ -58,7 +79,11 @@ function createEnv() {
     inject: (deps, callback) => { lifecycle.injects.push(deps) },
     effect: (fn) => { lifecycle.effects += 1; const disposer = fn(); return typeof disposer === 'function' ? disposer : () => {} },
     subagents: {
+      // 严格 mock：按 @deepseek-ai/dsh-subagent 的 SubagentActivationSpec 契约校验入参。
+      // 为什么必须严格：真实 manager.startLocal 第一行就是 `const parent = spec.parent`，
+      // 少了 parent 会在那一行抛 TypeError；旧 mock 什么都收，于是 123 个用例全绿而线上派活 100% 失败。
       startActivation: async (spec) => {
+        assertSubagentActivationSpec(spec)
         activations.push(spec)
         return { childId: spec.childId, result: Promise.resolve({ output: 'ok' }), dispose: async () => {} }
       },
@@ -264,10 +289,10 @@ test('PM 派任务：session_spawn_task 写 sessions 行 + 租约 + project-task
   assert.equal(spec.provider, 'spawn')
   assert.equal(spec.delivery, 'parent')
   assert.equal(spec.childId, result.dshSessionId)
-  assert.equal(spec.request.agentPreset, 'project-task')
-  assert.equal(spec.request.parent, pm.agent)
-  assert.equal(spec.request.agentOptions.provider, 'deepseek')
-  const promptText = spec.request.prompt[0].text
+  assert.equal(spec.agentPreset, 'project-task')
+  assert.equal(spec.parent, pm.agent)
+  assert.equal(spec.agentOptions.provider, 'deepseek')
+  const promptText = spec.prompt[0].text
   assert.ok(promptText.includes('角色卡'))
   assert.ok(promptText.includes('支付退款'))
   assert.ok(promptText.includes('session_finish_task'))
@@ -287,6 +312,47 @@ test('PM 派任务：session_spawn_task 写 sessions 行 + 租约 + project-task
   await assertToolError(callTool(env, 'session_spawn_task', {
     role: 'UX', sliceKey: 'pay-refund', action: '交互', prompt: 'x',
   }, taskAgent), 'PERMISSION_DENIED')
+})
+
+test('回归：session_spawn_task 的 spec 必须能被真实 DSH manager 直接消费（不得有 request 包装）', async (t) => {
+  // 事故：2026-11-23 线上 session_spawn_task 100% 失败，报 "Cannot read properties of undefined (reading 'id')"。
+  // 根因：调用方把 prompt/parent/agentPreset 包进了 { request: {...} }，而
+  // @deepseek-ai/dsh-subagent 的 SubagentActivationSpec 要求它们是顶层字段；
+  // manager.startLocal 第一行 const parent = spec.parent 拿到 undefined，下一行 parent.session.id 抛 TypeError。
+  // 之所以能带着这个 bug 上线：测试里的 mock 照单全收，把错误的形状固化成了断言。
+  // 这个用例存在，就是为了让 mocks 再也不能"宽容"地吃掉形状错误。
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const result = await callTool(env, 'session_spawn_task', {
+    role: '架构', sliceKey: 'pay-refund', action: '连通性自检', prompt: '只回一句话。',
+  }, pm.agent)
+  assert.ok(result.dshSessionId)
+  const spec = env.activations[0]
+  // 1) 无包装层
+  assert.equal(spec.request, undefined, 'spec 不得有 request 包装层')
+  // 2) DSH 真机会立即解引用这些字段
+  assert.equal(typeof spec.parent.session.id, 'string', 'DSH 会读 spec.parent.session.id')
+  assert.ok(Array.isArray(spec.prompt) && spec.prompt.length > 0, 'DSH 会读 spec.prompt')
+  assert.equal(spec.delivery, 'parent')
+  assert.equal(spec.provider, 'spawn')
+  assert.equal(spec.agentPreset, 'project-task')
+  assert.equal(typeof spec.label, 'string')
+  assert.ok(spec.childId, '预留 childId 才能后续 sendMessage/session_send_task')
+})
+
+test('回归：session_spawn_qa 同样不得用 request 包装（验收链会一起挂）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  await callTool(env, 'session_spawn_qa', { sliceId: slice.id, action: '验收', prompt: '复跑测试' }, pm.agent)
+  const spec = env.activations[env.activations.length - 1]
+  assert.equal(spec.request, undefined, 'spec 不得有 request 包装层')
+  assert.equal(typeof spec.parent.session.id, 'string', 'DSH 会读 spec.parent.session.id')
+  assert.ok(Array.isArray(spec.prompt) && spec.prompt.length > 0)
+  assert.equal(spec.agentPreset, 'project-qa')
 })
 
 test('任务会话：doc_write 版本链/冻结拒写 + 证据 + 收工硬校验', async (t) => {
@@ -891,10 +957,10 @@ test('工具输出必须是 lossless JSON（真实运行发现：undefined 会�
   assert.deepEqual(JSON.parse(JSON.stringify(clean)), clean)
 })
 
-test('角色卡 L1 注入：8 个角色都有完整文案，且不出现 undefined', async (t) => {
+test('角色卡 L1 注入：9 个角色都有完整文案，且不出现 undefined', async (t) => {
   const roles = await import('../../host/roles.js')
   const words = ['PM', ...roles.TASK_ROLES]
-  assert.equal(words.length, 8, 'PM + 7 个任务角色')
+  assert.equal(words.length, 9, 'PM + 8 个任务角色（v6 加「调研」）')
   for (const word of words) {
     const text = roles.roleCardText(word)
     assert.equal(typeof text, 'string')
@@ -924,6 +990,86 @@ test('角色卡 L1 注入：8 个角色都有完整文案，且不出现 undefin
   const compiled = compileContext(db, { roleKind: 'task', role: '测试', includeL1: true, includeL2: false })
   assert.ok(!compiled.parts.l1.includes('undefined'), 'L1 编译结果不得含 undefined')
   assert.ok(compiled.used <= 2000, '2k 硬上限')
+})
+
+test('角色卡外置：10 张卡都从 roles/*.md 读出来，且带「职责」节', async () => {
+  const roles = await import('../../host/roles.js')
+  const words = ['PM', 'QA', ...roles.TASK_ROLES]
+  assert.equal(words.length, 10, 'PM + QA + 8 个任务角色（v6 加「调研」）')
+  for (const word of words) {
+    // 来源必须是 file：走了兜底说明 roles/ 目录缺文件或 frontmatter 坏了
+    assert.equal(roles.ROLE_CARD_SOURCES.get(word), 'file', word + ' 的角色卡应从文件读取，实际走了兜底')
+    const text = roles.roleCardText(word)
+    assert.ok(text.includes('职责：'), word + ' 的角色卡应含「职责」节（外置卡新增）')
+  }
+  assert.deepEqual(roles.ROLE_CARD_ERRORS, [], '启动时不应有读卡失败')
+})
+
+test('角色卡外置：文件缺失时回退内置兜底卡（降级但绝不注入空串）', async () => {
+  const roles = await import('../../host/roles.js')
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { join, dirname } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const HERE = dirname(fileURLToPath(import.meta.url))
+  const dir = mkdtempSync(join(HERE, '.tmp-rolecards-'))
+  try {
+    // 只放一张卡，其余 8 个文件缺失
+    writeFileSync(join(dir, 'coder.md'), '# 坏卡（没有 frontmatter 也没有六节）\n')
+    const loaded = roles.loadRoleCards(dir)
+    for (const word of Object.keys(roles.ROLE_FILES)) {
+      assert.equal(loaded.source.get(word), 'fallback', word + ' 缺文件时必须走兜底')
+      assert.ok(loaded.cards.get(word), word + ' 兜底卡不能是 undefined')
+    }
+    assert.ok(loaded.errors.length >= 8, '缺失文件要如实报出来，不能静默')
+    // 兜底卡仍能拼出完整文案（宁可旧文案，也不能让会话开场拿到空角色卡）
+    const text = roles.roleCardText('码农')
+    assert.ok(text.startsWith('角色：码农（') && text.includes('红线：'), '兜底卡也要能注入')
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }) } catch {}
+  }
+})
+
+test('角色卡外置：parseRoleCard 解析 frontmatter 与六节，坏输入不抛异常', async () => {
+  const roles = await import('../../host/roles.js')
+  const good = roles.parseRoleCard([
+    '---',
+    'word: 测试角色',
+    'title: 测试标题',
+    'stage: S9',
+    '---',
+    '',
+    '## 职责',
+    '做一件事',
+    '',
+    '## 读',
+    '读 A',
+    '',
+    '## 写',
+    '写 B',
+    '',
+    '## 开工',
+    '- 第一步',
+    '- 第二步',
+    '',
+    '## 收工',
+    '- 收工一',
+    '',
+    '## 红线',
+    '别乱来',
+  ].join('\n'))
+  assert.equal(good.word, '测试角色')
+  assert.equal(good.title, '测试标题')
+  assert.equal(good.stage, 'S9')
+  assert.equal(good.duty, '做一件事')
+  assert.deepEqual(good.start, ['第一步', '第二步'])
+  assert.deepEqual(good.finish, ['收工一'])
+  assert.equal(good.guardrails, '别乱来')
+  // 空串/乱码都不抛：外置文件坏掉不能把会话开场一起弄崩
+  for (const bad of ['', 'not a card', '---\nword: x\n---\n## 职责\n']) {
+    const parsed = roles.parseRoleCard(bad)
+    assert.equal(typeof parsed, 'object')
+    assert.ok(Array.isArray(parsed.start) && Array.isArray(parsed.finish))
+  }
 })
 
 
@@ -1022,7 +1168,7 @@ test('v5 验收会话：session_spawn_qa 拉起 project-qa，不占租约、命�
   }, pm.agent)
   assert.equal(spawned.name, '验收-' + slice.key + '-验收')
   const activation = env.activations[env.activations.length - 1]
-  assert.equal(activation.request.agentPreset, 'project-qa', '验收会话必须用 project-qa preset')
+  assert.equal(activation.agentPreset, 'project-qa', '验收会话必须用 project-qa preset')
   // 不占租约：该切片的租约表里不应该出现验收会话
   const lease = env.db.db.prepare('SELECT * FROM leases WHERE slice_id = ?').get(slice.id)
   assert.equal(lease, undefined, '验收会话不应占租约')
@@ -1033,6 +1179,112 @@ test('v5 验收会话：session_spawn_qa 拉起 project-qa，不占租约、命�
 })
 
 
+
+
+// ---------------------------------------------------------------------------
+// v6：调研角色（把「调查」从 PM 手里收走，变成可派单的活）
+// ---------------------------------------------------------------------------
+
+/** 建一个调研会话（绑定 dsh 会话 id，便于用 agent 调工具）。 */
+function createResearchSession(env, slice, dshSessionId) {
+  const row = store.createSession(env.db, {
+    name: '调研-' + slice.key + '-查配置',
+    kind: 'task',
+    role: '调研',
+    sliceId: slice.id,
+    dshSessionId: dshSessionId || 'dsh-research-1',
+  })
+  return { row, agent: agentFor(dshSessionId || 'dsh-research-1', env.root, 'project-research') }
+}
+
+test('v6 调研：session_spawn_task(role=调研) 用 project-research preset，且**不占租约**', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const result = await callTool(env, 'session_spawn_task', {
+    role: '调研',
+    sliceKey: slice.key,
+    action: '查配置来源',
+    prompt: '查清 policy.json 的 ignoredDirectories 由谁读、改动影响哪些 checker 用例。',
+  }, pm.agent)
+  assert.equal(result.name, '调研-' + slice.key + '-查配置来源')
+  const activation = env.activations[env.activations.length - 1]
+  assert.equal(activation.agentPreset, 'project-research', '调研会话必须用只读 preset，不能复用 project-task')
+  // 关键：调研不占写作用域租约（否则同切片的实现会话会被挡在门外）
+  const lease = env.db.db.prepare('SELECT * FROM leases WHERE slice_id = ?').get(slice.id)
+  assert.equal(lease, undefined, '调研是只读动作，不应占切片租约')
+  // 但会话行本身要落库并 active
+  const row = store.getSession(env.db, result.session.id)
+  assert.equal(row.kind, 'task')
+  assert.equal(row.role, '调研')
+  assert.equal(row.status, 'active')
+})
+
+test('v6 调研：写者角色仍然占租约（不能把「不占租约」扩散成普遍行为）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  await callTool(env, 'session_spawn_task', {
+    role: '码农', sliceKey: slice.key, action: '实现', prompt: '改代码',
+  }, pm.agent)
+  const lease = env.db.db.prepare('SELECT * FROM leases WHERE slice_id = ?').get(slice.id)
+  assert.ok(lease, '码农会话必须持租约（写作用域锁）')
+})
+
+test('v6 调研：调研会话可以写报告与证据，但不能用 session_finish_task 推进切片', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  const research = createResearchSession(env, slice)
+  // 能写调研报告（且不受阶段交付类型约束：S1 只允许 prd，但调研在任何阶段都写 report）
+  const report = await callTool(env, 'doc_write', {
+    mode: 'create', type: 'report', title: '配置来源调研',
+    content: '# 配置来源\n\n结论：由 host/scope.js 读。出处：host/scope.js:41',
+  }, research.agent)
+  assert.equal(report.doc.type, 'report')
+  // 能记证据
+  const evidence = await callTool(env, 'evidence_add', {
+    kind: 'command', command: 'grep -rn ignoredDirectories tools/', resultSummary: '3 处命中',
+  }, research.agent)
+  assert.ok(evidence.evidence.id)
+  // 不能收工推进切片（那会让「只查不改」的角色改状态）
+  await assertToolError(callTool(env, 'session_finish_task', {
+    handoff: '调研完了', noOutOfScopeChanges: true,
+  }, research.agent), 'PERMISSION_DENIED')
+  assert.notEqual(store.getSlice(env.db, slice.id).status, 'review', '切片状态不应被调研推进')
+})
+
+test('v6 调研：report 即收工 —— 交结果后会话结束，但切片状态保持不变', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  createPm(env)
+  const slice = createSlice(env)
+  const research = createResearchSession(env, slice)
+  const before = store.getSlice(env.db, slice.id).status
+  const reported = await callTool(env, 'session_task_report', {
+    message: '结论：配置由 host/scope.js 读取；未解问题：policy 归属待 PM 决定。',
+  }, research.agent)
+  assert.equal(reported.reported, true)
+  assert.equal(reported.finished, true, '调研交结果即收工（否则会留一条永远 active 的会话）')
+  const row = store.getSession(env.db, research.row.id)
+  assert.equal(row.status, 'done')
+  assert.equal(store.getSlice(env.db, slice.id).status, before, '调研不推进切片状态')
+  // 收工后可以再派一次同切片的调研（同(切片,角色)唯一性不再被僵尸会话挡住）
+  const second = await callTool(env, 'session_spawn_task', {
+    role: '调研', sliceKey: slice.key, action: '复查', prompt: '复查',
+  }, createPm2(env).agent)
+  assert.ok(second.session.id)
+})
+
+/** 已存在 PM 时复用它（createPm 会因唯一约束失败）。 */
+function createPm2(env) {
+  const rows = store.listSessions(env.db, { kind: 'pm', status: 'active' })
+  const row = rows[0]
+  return { row, agent: agentFor(row.dshSessionId, env.root, 'project-office') }
+}
 
 // ---------------------------------------------------------------------------
 // v5：决策超时（B4）与周期推进（B6）

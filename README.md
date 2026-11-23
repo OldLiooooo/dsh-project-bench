@@ -128,7 +128,7 @@ in the workspace's `.project/`; delete it for a complete cleanup (back up `proje
 
 | Path | Contents |
 |---|---|
-| [`workbench/`](workbench/) | **The plugin** — host runtime (33 modules), client bundle (`client.js`, 4.6k lines), `cordis.patch.yml`, 3 presets, 9 skill templates, en/zh locales, scripts, tests |
+| [`workbench/`](workbench/) | **The plugin** — host runtime (33 modules), client bundle (`client.js`, 4.6k lines), `cordis.patch.yml`, 3 presets, 9 role cards (`roles/`), 9 skill templates, en/zh locales, scripts, tests |
 | [`docs/`](docs/) | Design proposals, architecture blueprints, delivery/acceptance notes, plugin development & publishing guide, research |
 | [`research/`](research/) | Background research material |
 | [`templates/`](templates/) | Plugin skeletons: [`host-bundle/`](templates/host-bundle/) (host-only) and [`ui-decoration/`](templates/ui-decoration/) (with Web UI) |
@@ -317,7 +317,7 @@ key 从 credentials refs 读取，绝不硬编码。
 
 | 路径 | 内容 |
 |---|---|
-| [`workbench/`](workbench/) | **插件本体** —— Host 运行时（33 个模块）、Client bundle（`client.js`，4.6k 行）、`cordis.patch.yml`、3 个 preset、9 个技能模板、中英 locale、脚本、测试 |
+| [`workbench/`](workbench/) | **插件本体** —— Host 运行时（33 个模块）、Client bundle（`client.js`，4.6k 行）、`cordis.patch.yml`、3 个 preset、9 张外置角色卡（`roles/`）、9 个技能模板、中英 locale、脚本、测试 |
 | [`docs/`](docs/) | 设计提案、架构施工图、交付/验收说明、插件开发与发布指南、研究资料 |
 | [`research/`](research/) | 背景研究材料 |
 | [`templates/`](templates/) | 插件骨架：[`host-bundle/`](templates/host-bundle/)（纯 Host）与 [`ui-decoration/`](templates/ui-decoration/)（带 Web UI） |
@@ -388,7 +388,7 @@ export DSH_HOME="$(pwd)/.dshhome"                        # ❌ MSYS pwd 给 /c/.
 ### 现状与后续
 
 **MVP 清单已完成（schema v5）。** 权威源、可拒绝状态机、判据来自机器、人批准唯一出口、
-只认 verified 的进度、独立验收会话、显式周期、看板视图、自动生成的周报、9 个 SOP 技能 —— 全部到位，
+只认 verified 的进度、独立验收会话、显式周期、看板视图、自动生成的周报、9 个 SOP 技能、9 张外置角色卡 —— 全部到位，
 并且在真实仓库上端到端跑通过（`probes/gate2-real-project.mjs`，26/26：
 进度 0%→100%，门禁被判据红灯拒绝、修好后重提转绿）。
 

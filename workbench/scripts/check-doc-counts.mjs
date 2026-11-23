@@ -70,8 +70,27 @@ export function measure() {
       if (body === '') catchEmpty += 1
     }
   }
+  // 按 actor 统计可见工具数（v6 起文档写「PM 可见 27」，这类数字最容易漂）
+  let pmVisible = 0
+  let taskVisible = 0
+  let qaVisible = 0
+  for (const file of toolFiles) {
+    const text = readText(join(WORKBENCH, 'host', 'tools', file))
+    const blocks = text.split(/^  name: /m).slice(1)
+    for (const block of blocks) {
+      const actors = block.match(/actors: \[([^\]]*)\]/)
+      if (!actors) continue
+      const list = actors[1].split(',').map((item) => item.trim().replace(/['"]/g, ''))
+      if (list.includes('pm')) pmVisible += 1
+      if (list.includes('task')) taskVisible += 1
+      if (list.includes('qa')) qaVisible += 1
+    }
+  }
   return {
     tools,
+    pmVisible,
+    taskVisible,
+    qaVisible,
     tables: (schema.match(/CREATE TABLE|CREATE VIRTUAL TABLE/g) || []).length,
     // 只数**真的** CREATE TRIGGER 语句：行首是两个空格 + 反引号（模板字符串里的 DDL），
     // 这样注释、正则字符串里的 "CREATE TRIGGER" 不会被误算（verifyMigration 里就有一处）。
@@ -113,6 +132,12 @@ const CLAIMS = [
     file: 'docs/workbench-design-logic.zh.md',
     label: '能力层一行（工具数）',
     contains: (a) => `能力层：${a.tools} 个工具`,
+  },
+  {
+    // v6：这一句曾经同时漂了三个数（工具 30/31、PM 可见 26/27、「验收独有 1」其实是共享）
+    file: 'docs/workbench-design-logic.zh.md',
+    label: '工具可见数一行（PM/任务/验收）',
+    contains: (a) => `PM 可见 ${a.pmVisible}，任务可见 ${a.taskVisible}，验收（qa）可见 ${a.qaVisible}`,
   },
   {
     file: 'docs/workbench-design-logic.zh.md',
