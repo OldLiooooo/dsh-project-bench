@@ -640,6 +640,46 @@ WIP 只提示不强制（设计提到「进行中 ≤ 团队规模」，但团�
 **守门**：`tests/unit/presets.test.mjs`（PM 不得挂 fs/bash、调研开关必须显式 false）；
 `tools.test.mjs` 的 4 个 v6 用例（不占租约 / 写者仍占 / 不能收工推进 / report 即收工）。
 
+### 4.8 v6.1：跨树失联会话 —— 真机复验测出来的死锁
+
+**它是怎么被发现的**：v6 的真机复验（2026-11-23）里，PM 重开后想复用上一轮的调研会话，
+被拒；改派新的，也被拒。PM 自己的原话：
+
+> 补发消息被工作台拒绝，因为现有会话属于另一棵子代理树，无法从当前 PM 会话向它投递。
+> ……也不允许在同一切片下再启动第二个调研会话。因此目前没有可核实的调研回执。
+
+**根因是 DSH 的相邻关系规则，不是我们的 bug，但后果落在我们身上**：
+`sendMessage` 只允许在**同一条 activation 树**里投递。PM 会话重开/重启后是新的根会话，
+旧任务会话挂在上一棵树里。于是 DB 里两边都是 `active`、面板上也看得见，**消息通道已经断了**。
+
+旧实现对此毫无察觉，凑成一个死锁：
+
+| PM 的动作 | 结果 |
+|---|---|
+| `session_send_task` 复用旧会话 | 投递失败（另一棵树） |
+| `session_spawn_task` 重新派 | `DUPLICATE_ACTIVE_SESSION`（旧会话仍是 active） |
+
+**v6.1 的修法**（两条路都给通了，而不是选一条）：
+
+| 改动 | 位置 | 说明 |
+|---|---|---|
+| `canDeliverToSession(ctx, parentDshSessionId, childDshSessionId)` | `host/orchestration.js` | 用 `ctx.subagents.listChildren()` 这个**只读目录**判定：目标在不在父会话的直接子级清单里 |
+| `session_send_task` 预检 | `host/tools/pm-tools.js` | 投递不到时报 `SESSION_UNREACHABLE`，消息里**直接写明**「重新 session_spawn_task 即可接替」，不让 PM 反复撞墙 |
+| `session_spawn_task` 接替 | `host/orchestration.js` | 同(切片,角色) 的 active 会话若判定为不可投递 → 标 `interrupted`（`SUPERSEDED_UNREACHABLE`）+ 释放其租约，再建新会话；返回值带 `superseded` 让 PM 知道发生了什么 |
+| 工具层唯一性例外 | `host/tools/pm-tools.js` | 只有「**全部**旧会话都不可投递」才放行接替 |
+
+**关键取舍：判定不出来时绝不误杀。**
+`listChildren` 不可用（老版本/服务缺失/调用抛错）→ 返回 `undefined`，调用方保留原语义
+（照旧报 `DUPLICATE_ACTIVE_SESSION`）。宁可让 PM 看到一次明确的冲突，也不要把「探测不到」当成「已经死了」——
+后者会静默杀掉一个还能用的会话，而且用户无从察觉。这条由
+`tools.test.mjs` 的「判定不出来时不许误杀」用例锁住。
+
+**真机验证（2026-11-24，4/4）**：PM 重开后不再死锁，能真的把调研派出去。实测它走了
+「开新切片接管」这条路（合规的另一条路），没有触发 `superseded` —— 所以断言验的是
+**死锁特征消失**（不再出现 `DUPLICATE_ACTIVE_SESSION`），而不是「必须走哪条路」。
+
+---
+
 ## 5. 关键流程
 
 ### 5.1 用户提需求 → PM 拆活 → 任务执行
@@ -698,6 +738,7 @@ DUPLICATE_SLICE
         STALE_PRECHECK       STALE_APPROVAL
         STALE_GATE_STAGE     CONFIRM_REQUIRED  CONFLICT
 编排    SPAWN_FAILED         DELIVERY_FAILED
+        SESSION_UNREACHABLE  （v6.1）会话 DB 里 active 但 DSH 侧投递不到 → 让 PM 重新派单接替
 接入    NOT_PROJECT_SESSION  PERMISSION_DENIED  NO_EVIDENCE
         NOT_REGISTERED_WORKSPACE  MISSING_WORKSPACE  INVALID_ROOT
         NOT_INITIALIZED      PROJECT_DB_ERROR
@@ -711,6 +752,15 @@ DUPLICATE_SLICE
 INVALID                    参数/状态不合法（最常用）
 NOT_FOUND                  实体不存在
 DUPLICATE_ACTIVE_SESSION   同切片同角色已有 active 会话
+```
+
+**v6.1 新增（1）**：
+
+```
+SESSION_UNREACHABLE        目标会话在 DB 里仍是 active，但 DSH 侧已无法投递
+                           （换了 activation 树 / 进程重启 / 会话被回收）。
+                           语义是「这条消息送不到」，不是「这个会话被拉黑」——
+                           正确动作是 session_spawn_task 重新派同一(切片,角色)，工作台会接替它。
 ```
 
 **v4 新增（3）**：
@@ -778,7 +828,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 判据隔离不是安全边界 | 恶意判据仍可读宿主文件（同进程空间，`spawn` EPERM 使进程级隔离不可用） | 中（已在 ADR 明写） |
 | 多人身份不能**强制**分离 | 能追责、不能阻止同人既提又批；无 RBAC | 中 |
-| 66 个空 catch 仍在（共 185 个 catch，2026-11-23 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| 69 个空 catch 仍在（共 189 个 catch，2026-11-24 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
 | ~~`period` 元数据从未写入~~ | **v5 已修**：`period_roll` 显式推进并写 meta + `period/roll` 事件；不做日历自动滚动（跨零点归属会变成猜） | — |
 | ~~无周报生成~~ | **v5 已修**：`weekly_report` 从项目库自动渲染（进度/待决策/阻塞/本期完成），确定性可重复，可直接贴 GitHub Issue | — |
 | ~~`deliverableTypes` 只写不读~~ | **v5 已修**：`doc_write` 新建文档时按阶段校验（`STAGE_DELIVERABLE_NOT_ALLOWED`）；只拦新建不拦追加 | — |
