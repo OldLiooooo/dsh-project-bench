@@ -22,8 +22,12 @@
   slot 注册：ctx.slots.inject(name,()=>ctx.slots.register({name, key|id, order, locale, inject:(sessionId)=>({...})}, Component))；
   session 作用域 slot 的组件收到 sessionId 与 t；根作用域（main/sidebar.panellist）没有 sessionId。
 - 客户端可用 ctx 服务：slots, locale, layout（selectPanel）, uiWorkspace（openSession/startSession）, sessions, workspaces。
-- 任务会话编排：ctx.subagents.startActivation({delivery:'parent', childId, provider:'spawn', label, request:{prompt:[{type:'text',text}], parent: pmAgent, agentPreset:'project-task', agentOptions:{provider,model}}, signal})
-  → 返回 { childId, result, dispose }；childId 先自己生成 UUID 再传入（本地后端要求）。
+- 任务会话编排：ctx.subagents.startActivation({delivery:'parent', provider:'spawn', childId, label, prompt:[{type:'text',text}], parent: pmAgent, agentPreset:'project-task', agentOptions:{provider,model}, signal})
+  → 返回 { childId, name, messageId?, result, dispose }；childId 先自己生成 UUID 再传入（本地后端要求）。
+  **prompt / parent / agentPreset 都是顶层字段，没有 request 包装层。**
+  形状若包错，DSH 侧 manager.startLocal 的 `const parent = spec.parent` 会拿到 undefined，
+  报错只有一句 `Cannot read properties of undefined (reading 'id')`，看不出缺哪个字段。
+  契约来源：@deepseek-ai/dsh-subagent 的 SubagentActivationSpec（0.2.2-rc.5 实测）。
   PM→任务消息：ctx.subagents.sendMessage(pmAgent, childDshSessionId, [{type:'text',text}], {signal})。
   任务→PM 消息：ctx.subagents.sendMessage(taskAgent, pmSessionId, [...], {signal})。
   唤醒 PM 的宿主通知：构造 UserMessage { id: randomUUID(), role:'user', content:[{type:'text',text}], source:{kind:'project-workbench'} }，
@@ -132,7 +136,11 @@ compileContext(db,{roleKind:'pm'|'task',sessionId,role,sliceId,step,lastSliceId}
 - L1 ≤300：角色卡（PM/产品/UX/架构/码农/测试/发布/复盘）读写边界+开工收工清单（会话启动/切切片注入）
 - L2 ≤900：当前切片 title/status/owner/handoff 摘要 + 本任务 acceptance + 相关文档标题与 1 行摘要 + 最近 3 条事件
 - 余量 400 留给工具结果；总注入硬上限 2000（estimateTokens），超限先裁 L2 再裁 L1，l0 最后；degraded=true 时注入一行 "上下文已降级，使用 project_recall/doc_get 按需查询"。
-- 角色卡内容在 host/roles.js（T4 拥有，静态）。
+- 角色卡内容**外置**在 workbench/roles/*.md（9 张：PM/QA/产品/UX/架构/码农/测试/发布/复盘），
+  由 host/roles.js 启动时读取并解析（frontmatter word/title/stage + 六节 职责/读/写/开工/收工/红线）；
+  读文件失败时回退 roles.js 里的 FALLBACK_CARDS（**绝不注入空串**），错误进 ROLE_CARD_ERRORS。
+  两份内容由 scripts/check-role-cards.mjs 校验一致（漂移 exit=1）。
+  **外置的只是文案**：权限仍在工具层（actors/when）、写作用域（scope.js）、租约与 verifySlice 三道闸。
 
 ## 7. host/tools/**（T4）— 工具清单（名字固定，参数为纯 JSON Schema）
 

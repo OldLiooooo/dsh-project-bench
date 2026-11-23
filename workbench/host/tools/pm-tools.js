@@ -374,11 +374,9 @@ export const sessionSpawnQa = {
         provider: 'spawn',
         childId: dshSessionId,
         label: name,
-        request: {
-          prompt: [{ type: 'text', text: text }],
-          parent: _exec && _exec.agent,
-          agentPreset: 'project-qa',
-        },
+        prompt: [{ type: 'text', text: text }],
+        parent: _exec && _exec.agent,
+        agentPreset: 'project-qa',
         signal: _exec && _exec.signal,
       })
     } catch (error) {

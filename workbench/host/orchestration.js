@@ -385,12 +385,13 @@ export async function spawnTaskSession(ctx, deps, input) {
       provider: 'spawn',
       childId: dshSessionId,
       label: name,
-      request: {
-        prompt: [{ type: 'text', text: assignment.text }],
-        parent: parentAgent,
-        agentPreset: 'project-task',
-        ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
-      },
+      // 契约（@deepseek-ai/dsh-subagent 0.2.2-rc.5 实测）：prompt / parent / agentPreset 是**顶层字段**。
+      // 之前包在 request 里，DSH 侧 manager.startLocal 的 const parent = spec.parent 拿到 undefined，
+      // 派活 100% 失败（错误只有一句 Cannot read properties of undefined (reading 'id')）。
+      prompt: [{ type: 'text', text: assignment.text }],
+      parent: parentAgent,
+      agentPreset: 'project-task',
+      ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       signal,
     })
   } catch (error) {

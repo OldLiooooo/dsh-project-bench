@@ -1,7 +1,8 @@
 # preset: project-task（项目任务会话）
 
 **谁创建**：PM 调 `session_spawn_task({role, sliceKey, action, prompt, ...})` → Host 用
-`ctx.subagents.startActivation({provider:'spawn', delivery:'parent', childId, agentPreset:'project-task', ...})`
+`ctx.subagents.startActivation({provider:'spawn', delivery:'parent', childId, label, prompt, parent, agentPreset:'project-task', ...})`
+（**prompt / parent 是顶层字段**，不存在 request 包装层 —— 见 docs/implementation/contracts-v1.zh.md）
 拉起；会话名 = 角色-切片-动作（如 产品-支付退款-PRD / 码农-支付退款-实现）。
 
 **职责**：承接一个切片的一个角色任务：决定怎么做、按需拉子 agent、产出文档/证据/交接，收工向 PM 汇报。

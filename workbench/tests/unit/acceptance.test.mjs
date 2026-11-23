@@ -80,7 +80,10 @@ export async function makeSuite() {
       const count = reopened.db.prepare('SELECT COUNT(*) AS c FROM schema_migrations').get()
       const versions = reopened.db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row) => Number(row.version))
       H.expectEqual(Number(count.c), versions.length, 'schema_migrations 不应重复写入（每版本恰好一行）')
-      H.expectEqual(JSON.stringify(versions), JSON.stringify([2, 3]), '迁移版本应为 2 和 3')
+      // 不写死版本号：schema 已到 v5，写死 [2,3] 的断言在 v4/v5 落地后就一直是红的
+      // （「每个迁移恰好一行」才是这里要保证的不变量，版本集合应跟随 SCHEMA_VERSION）。
+      const expectedVersions = Array.from({ length: schema.SCHEMA_VERSION - 1 }, (_, i) => i + 2)
+      H.expectEqual(JSON.stringify(versions), JSON.stringify(expectedVersions), '迁移版本应覆盖 2..' + String(schema.SCHEMA_VERSION) + ' 且无重复')
       reopened.close()
     } finally { db.close(); }
   })

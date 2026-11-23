@@ -244,10 +244,15 @@ export function makeFakeCtx(options = {}) {
       register(...args) { state.cards.push(args); return () => {} },
     },
     subagents: {
-      async startActivation(request) {
+      async startActivation(spec) {
+        // 按 DSH SubagentActivationSpec 真实契约校验：prompt/parent 在顶层，没有 request 包装层。
+        // 假 ctx 若照单全收，插件传错形状也只有真机能发现（这就是 2026-11-23 线上派活全挂的成因）。
+        if (spec && spec.request !== undefined) throw new Error('startActivation 收到了 request 包装层（DSH 只读 spec.parent/prompt）')
+        if (!spec || !Array.isArray(spec.prompt) || spec.prompt.length === 0) throw new Error('startActivation 缺少顶层 prompt')
+        if (!spec.parent || !spec.parent.session || typeof spec.parent.session.id !== 'string') throw new Error('startActivation 缺少顶层 parent.session.id')
         childSeq += 1
-        const childId = request && request.childId ? request.childId : 'fake-child-' + String(childSeq)
-        state.subagentCalls.push({ kind: 'startActivation', request })
+        const childId = spec.childId ? spec.childId : 'fake-child-' + String(childSeq)
+        state.subagentCalls.push({ kind: 'startActivation', spec })
         return { childId, result: Promise.resolve({ text: 'fake subagent result' }), dispose() {} }
       },
       async sendMessage(agent, dshSessionId, content, delivery) {

@@ -119,6 +119,10 @@ const ctx = {
   on: () => () => {},
   subagents: {
     async startActivation(spec) {
+      // 按 DSH SubagentActivationSpec 真实契约校验：prompt/parent 在顶层，没有 request 包装层。
+      if (spec.request !== undefined) throw new Error('startActivation 收到了 request 包装层（DSH 只读 spec.parent/prompt）')
+      if (!Array.isArray(spec.prompt) || spec.prompt.length === 0) throw new Error('startActivation 缺少顶层 prompt')
+      if (!spec.parent || !spec.parent.session || typeof spec.parent.session.id !== 'string') throw new Error('startActivation 缺少顶层 parent.session.id')
       activations.push(spec)
       return { childId: spec.childId, result: Promise.resolve({ output: 'ok' }), dispose: async () => {} }
     },
@@ -201,10 +205,10 @@ try {
 } catch (error) { spawnError = error }
 check('⑧ PM 拉起任务会话（角色-切片-动作）', Boolean(spawned && spawned.session), spawnError ? String(spawnError.message) : spawned.session.name)
 const activationSpec = activations[0]
-const activationPrompt = activationSpec && activationSpec.request && Array.isArray(activationSpec.request.prompt) ? activationSpec.request.prompt.map((part) => part.text || '').join('') : ''
+const activationPrompt = activationSpec && Array.isArray(activationSpec.prompt) ? activationSpec.prompt.map((part) => part.text || '').join('') : ''
 check('⑨ subagents.startActivation 收到 project-task preset + 开场简报',
-  activations.length === 1 && activationSpec.request && activationSpec.request.agentPreset === 'project-task' && activationPrompt.length > 50,
-  activationSpec ? JSON.stringify({ preset: activationSpec.request && activationSpec.request.agentPreset, briefChars: activationPrompt.length, label: activationSpec.label }) : 'no activation')
+  activations.length === 1 && activationSpec.agentPreset === 'project-task' && activationPrompt.length > 50,
+  activationSpec ? JSON.stringify({ preset: activationSpec.agentPreset, briefChars: activationPrompt.length, label: activationSpec.label }) : 'no activation')
 
 const spawnedSession = spawned ? store.getSession(db, spawned.session.id) : undefined
 const taskDshId = spawnedSession ? spawnedSession.dshSessionId : 'dsh-task-missing'
