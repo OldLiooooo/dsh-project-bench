@@ -1286,6 +1286,97 @@ function createPm2(env) {
   return { row, agent: agentFor(row.dshSessionId, env.root, 'project-office') }
 }
 
+
+// ---------------------------------------------------------------------------
+// v6.1：跨树失联会话 —— 真机复验 2026-11-23 实测的死锁
+// ---------------------------------------------------------------------------
+
+/**
+ * 模拟「PM 会话重开」：旧任务会话在 DB 里仍然 active，但 DSH 侧已经拿不到它的 agent。
+ * 这正是真机上发生的状态 —— sendMessage 会因「属于另一棵子代理树」失败。
+ */
+function makeChildCatalog(env, childIds) {
+  // DSH 的 SubagentActivationSpec 相邻关系用 listChildren(父会话) 判定：
+  // 只读父会话的**直接子级**目录；不在目录里的子会话就投递不到。
+  const ids = childIds || []
+  env.ctx.subagents.listChildren = async (parentSessionId) => ids.map((id) => ({ id, mode: 'continuable', label: id, parentSessionId }))
+}
+
+test('v6.1 失联会话：session_send_task 给出可操作错误，而不是撞 DELIVERY_FAILED', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 换树后：PM 的直接子级目录里已经没有这条任务会话
+  makeChildCatalog(env, [])
+  await assertToolError(callTool(env, 'session_send_task', {
+    sessionId: task.row.id, message: '补充一下范围',
+  }, pm.agent), 'SESSION_UNREACHABLE')
+  // 明确告诉 PM 该怎么做：重新派单，而不是反复 send
+  const err = await callTool(env, 'session_send_task', { sessionId: task.row.id, message: 'x' }, pm.agent).catch((e) => e)
+  assert.equal(err.code, 'SESSION_UNREACHABLE')
+  assert.match(err.message, /session_spawn_task/)
+  assert.equal(err.details && err.details.hint, 'respown')
+})
+
+test('v6.1 失联会话：重新派单会自动接替它（标 interrupted + 释放租约）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 旧任务会话不在 PM 的直接子级目录里（换树/重启后）
+  makeChildCatalog(env, [])
+  const result = await callTool(env, 'session_spawn_task', {
+    role: '码农', sliceKey: slice.key, action: '重做', prompt: '重新实现',
+  }, pm.agent)
+  assert.ok(result.session.id, '应建出新会话')
+  // 旧会话被标 interrupted 并写明原因
+  const old = store.getSession(env.db, task.row.id)
+  assert.equal(old.status, 'interrupted', '失联的旧会话应被接替')
+  assert.equal(old.failureCode, 'SUPERSEDED_UNREACHABLE')
+  // 租约从旧会话转到新会话（不是被永久占住）
+  const lease = leases.getLease(env.db, slice.id)
+  assert.equal(lease.sessionId, result.session.id, '租约应转给新会话')
+  // 返回值要告诉 PM 发生了什么
+  assert.ok(result.superseded, '返回值应带 superseded 说明')
+  assert.equal(result.superseded.sessionId, task.row.id)
+})
+
+test('v6.1 失联会话：**判定不出来时不许误杀**（ctx.agents 不可用 → 不接替）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 目录不可用 = 无法判定，不能把「探测不到」当成「已经死了」
+  delete env.ctx.subagents.listChildren
+  const attempted = await callTool(env, 'session_spawn_task', {
+    role: '码农', sliceKey: slice.key, action: '重做', prompt: '重新实现',
+  }, pm.agent).catch((e) => e)
+  // 仍然会被唯一性拦住（这是对的：无法判定时保留原语义，让 PM 看到明确冲突）
+  assert.equal(attempted && attempted.code, 'DUPLICATE_ACTIVE_SESSION')
+  const old = store.getSession(env.db, task.row.id)
+  assert.equal(old.status, 'active', '无法判定时不得把旧会话标成失联')
+})
+
+test('v6.1 失联会话：还能投递的会话不会被接替（不误伤正常会话）', async (t) => {
+  const env = createEnv()
+  t.after(() => env.dispose())
+  const pm = createPm(env)
+  const slice = createSlice(env)
+  const task = createTaskSession(env, slice)
+  // 旧会话仍在 PM 的直接子级目录里，能收到消息
+  makeChildCatalog(env, ['dsh-task-1'])
+  const attempted = await callTool(env, 'session_spawn_task', {
+    role: '码农', sliceKey: slice.key, action: '重做', prompt: '重新实现',
+  }, pm.agent).catch((e) => e)
+  assert.equal(attempted && attempted.code, 'DUPLICATE_ACTIVE_SESSION', '能投递的会话应继续保护唯一性')
+  const old = store.getSession(env.db, task.row.id)
+  assert.equal(old.status, 'active')
+})
+
 // ---------------------------------------------------------------------------
 // v5：决策超时（B4）与周期推进（B6）
 // ---------------------------------------------------------------------------

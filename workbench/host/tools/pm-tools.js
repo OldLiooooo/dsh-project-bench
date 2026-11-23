@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { fail } from '../db.js'
 import { newId, nowIso, estimateTokens, sha256 } from '../util.js'
 import { TASK_ROLES, ROLE_HELP, isKnownRole, taskSessionName } from '../roles.js'
-import { resolveSlice, spawnTaskSession } from '../orchestration.js'
+import { resolveSlice, spawnTaskSession, canDeliverToSession } from '../orchestration.js'
 import { validateGateTarget } from '../project.js'
 import { runProjectCheckers, summarizeCheckRun } from '../checkers.js'
 import {
@@ -247,7 +247,19 @@ export const sessionSpawnTask = {
     }
     const existing = deps.store.listSessions(actor.db, { kind: 'task', status: 'active', sliceId: slice.id, role: role })
     if (existing.length > 0) {
-      throw fail('DUPLICATE_ACTIVE_SESSION', '同一（切片,角色）已有 active 任务会话：' + existing[0].name + '（先收工或换切片/角色）', { sessionId: existing[0].id })
+      // 例外：旧会话虽然 active，但在 DSH 侧已经投递不到（PM 重开/换树/进程重启）。
+      // 那种情况下拒绝派单等于把 PM 锁死 —— 发不出去也派不进来。交给 spawnTaskSession 接替它。
+      // 判定不出来（目录服务不可用）时保持原语义：宁可报明确冲突，也不误杀。
+      let unreachableAll = true
+      for (const row of existing) {
+        const deliverable = await canDeliverToSession(ctx, actor.dshSessionId, row.dshSessionId)
+        if (deliverable !== false) { unreachableAll = false; break }
+      }
+      if (!unreachableAll) {
+        throw fail('DUPLICATE_ACTIVE_SESSION',
+          '同一（切片,角色）已有 **可投递的** active 任务会话：' + existing[0].name + '（先收工、换切片/角色，或用 session_send_task 补充要求）。',
+          { sessionId: existing[0].id })
+      }
     }
     const spawned = await spawnTaskSession(ctx, deps, {
       actor: actor,
@@ -271,6 +283,10 @@ export const sessionSpawnTask = {
       slice: { id: slice.id, key: slice.key, title: slice.title },
       lease: spawned.lease ? { sliceId: spawned.lease.sliceId, expiresAt: spawned.lease.expiresAt } : null,
       promptTokens: estimateTokens(spawned.assignment.text),
+      // 接替提示：PM 需要知道「我这次派单顺手清理了一条失联会话」，否则它会困惑为什么重名会话不见了。
+      ...(spawned.superseded
+        ? { superseded: spawned.superseded, note: '已接替一条失联会话（DB 里 active 但 DSH 侧不可投递），它被标为 interrupted：' + spawned.superseded.name }
+        : {}),
     }
   },
 }
@@ -302,11 +318,27 @@ export const sessionSendTask = {
     if (!target.dshSessionId) throw fail('INVALID', '任务会话没有绑定 DSH 会话（可能尚未启动）：' + target.name)
     const sender = _exec && _exec.agent
     if (!sender || !ctx.subagents || typeof ctx.subagents.sendMessage !== 'function') throw fail('UNAVAILABLE', 'subagents 服务不可用')
+    // 预检：DSH 只允许在**同一条 activation 树**里投递。PM 会话重开/重启后，
+    // 旧任务会话虽然 DB 里还是 active，但已经收不到消息了（真机复验 2026-11-23 实测）。
+    // 这里提前判定，给出一个**可操作**的错误（而不是让 PM 反复撞 DELIVERY_FAILED 后空手回答）。
+    if (await canDeliverToSession(ctx, (sender && sender.session && sender.session.id) || (actor && actor.dshSessionId), target.dshSessionId) === false) {
+      throw fail('SESSION_UNREACHABLE',
+        '会话「' + target.name + '」在 DB 里是 active，但 DSH 侧已无法投递（属于另一棵子代理树或已失活）。'
+        + '处理办法：重新调 session_spawn_task 派同一(切片,角色)——工作台会自动把这条失联会话标 interrupted 并接替它；'
+        + '不要反复 session_send_task。',
+        { sessionId: target.id, dshSessionId: target.dshSessionId, name: target.name, hint: 'respown' })
+    }
     try {
       await ctx.subagents.sendMessage(sender, target.dshSessionId, [{ type: 'text', text: message }], { signal: _exec && _exec.signal })
     } catch (error) {
       const detail = String(error && error.message ? error.message : error)
-      throw fail('DELIVERY_FAILED', '消息投递失败：' + detail, { sessionId: target.id, dshSessionId: target.dshSessionId })
+      // 兜底：预检说能投递但实际失败（竞态/A2A 规则变化）。同样给可操作提示。
+      const unreachable = /another sub-agent tree|not a direct child|adjacency|not.*reachable/i.test(detail)
+      throw fail(unreachable ? 'SESSION_UNREACHABLE' : 'DELIVERY_FAILED',
+        unreachable
+          ? '消息投递失败：' + detail + '。处理办法：重新 session_spawn_task 同一(切片,角色) 以接替这条失联会话。'
+          : '消息投递失败：' + detail,
+        { sessionId: target.id, dshSessionId: target.dshSessionId, ...(unreachable ? { hint: 'respown' } : {}) })
     }
     return { delivered: true, session: minimalSession(target), messageChars: message.length }
   },

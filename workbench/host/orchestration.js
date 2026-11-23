@@ -327,6 +327,37 @@ export async function spawnTaskSession(ctx, deps, input) {
   if (provider) agentOptions.provider = provider
   if (model) agentOptions.model = model
   if (reasoningEffort) agentOptions.reasoningEffort = reasoningEffort
+  // v6.1：接替「仍然 active 但已经收不到消息」的同(切片,角色)会话。
+  //
+  // 为什么必须有这一步：PM 会话重开/重启后，旧任务会话还挂在上一棵 activation 树里，
+  // DB 里仍是 active（所以唯一性会拦新派单），但 DSH 的相邻关系规则已经不允许再投递。
+  // 旧行为是死锁：PM 既发不出去，也派不进来，只能对用户说「拿不到结果」。
+  // 现在改成：判定为不可投递的旧会话 → 标 interrupted（带原因）+ 释放它的租约，再建新会话。
+  // 注意：判定不出来（ctx.agents 不可用）时**不动**旧会话 —— 宁可让 PM 看到唯一的报错，
+  // 也不要因为探测不到就把它当成死的，误杀了还能用的会话。
+  let superseded
+  try {
+    const previous = deps.store.listSessions(db, { kind: 'task', status: 'active', sliceId: slice.id, role: role })
+    for (const row of previous) {
+      if (!row) continue
+      const deliverable = await canDeliverToSession(ctx, actor.dshSessionId, row.dshSessionId)
+      if (deliverable !== false) continue
+      try {
+        deps.store.endSession(db, {
+          id: row.id,
+          status: 'interrupted',
+          failureCode: 'SUPERSEDED_UNREACHABLE',
+          failureDetail: '会话在 DB 里仍是 active，但 DSH 侧已无法投递（换树/进程重启）：' + String(row.name || row.id)
+            + '（dshSessionId=' + String(row.dshSessionId || '-') + '）。PM 重新派单时被自动接替。',
+        })
+      } catch (error) { /* 结束失败就跳过接替，让下面的唯一约束报错（保留原语义） */ }
+      try {
+        const lease = deps.leases.getLease(db, slice.id)
+        if (lease && lease.sessionId === row.id) deps.leases.releaseLease(db, { sliceId: slice.id, sessionId: row.id })
+      } catch (error) { /* 租约释放失败：新会话 acquireLease 会明确报 LEASE_HELD */ }
+      superseded = row
+    }
+  } catch (error) { /* 查询失败不阻断派单；唯一约束会给出明确错误 */ }
   const session = deps.store.createSession(db, {
     name,
     kind: 'task',
@@ -447,7 +478,7 @@ export async function spawnTaskSession(ctx, deps, input) {
     })
     throw wrapped
   }
-  return { session, dshSessionId, lease, assignment, activation, name, fenceEpoch }
+  return { session, dshSessionId, lease, assignment, activation, name, fenceEpoch, superseded: superseded ? { sessionId: superseded.id, name: superseded.name, dshSessionId: superseded.dshSessionId } : undefined }
 }
 
 /** 找当前 active PM 会话行。 */
@@ -460,6 +491,41 @@ export function findPmSession(deps, db) {
     try { return deps.project.pmEnsure(db) || undefined } catch (error) { /* 忽略 */ }
   }
   return undefined
+}
+
+/**
+ * 这个项目会话的 DSH agent 现在还能不能收消息？
+ *
+ * 为什么需要它（真机复验 2026-11-23 实测）：DSH 的 sendMessage 要求**确切相邻关系** ——
+ * 消息只能在「同一条 activation 树」里投递。PM 会话重开/重启后是新的根会话，
+ * 而旧的调研/任务会话挂在上一棵树里，于是 PM 调 session_send_task 会失败，
+ * 报「existing session belongs to another sub-agent tree」。
+ *
+ * 那一刻 DB 里两边都是 active，面板上也看得见，但**消息通道已经断了**。
+ * 旧实现对此毫无察觉：PM 既不能发消息（投递失败），也不能重新派单
+ * （同切片同角色唯一性会拦），只能空手告诉用户「我拿不到结果」——
+ * 这是真机上真实发生的死锁，不是理论问题。
+ *
+ * 判定口径（只认「现场事实」，不猜）：
+ *   - ctx.agents 拿不到该会话的 agent（进程重启/会话被回收）→ 不可投递；
+ *   - agent 存在但不在活动态、也没有 followup/steer 能力 → 不可投递；
+ *   - 拿不到 ctx.agents 服务本身 → 返回 undefined（无法判定），由调用方决定是否放行。
+ * @returns {boolean|undefined} true/false 为确定结论，undefined 为无法判定
+ */
+export async function canDeliverToSession(ctx, parentDshSessionId, dshSessionId) {
+  if (!dshSessionId) return false
+  const subagents = ctx && ctx.subagents
+  // 只用**只读目录**判定（listChildren）：它是父会话持久化的直接子级清单，
+  // 不加载也不恢复子 agent。绝不用「agents.get 拿不到」来推断失联 ——
+  // 拿不到 live agent 可能只是还没物化，把它当成死了会误杀还能用的会话。
+  // 目录不可用（无该服务/调用抛出）时返回 undefined = 无法判定，调用方必须保留原语义。
+  if (!subagents || typeof subagents.listChildren !== 'function') return undefined
+  if (!parentDshSessionId) return undefined
+  let list
+  try { list = await subagents.listChildren(parentDshSessionId) } catch (error) { return undefined }
+  if (!Array.isArray(list)) return undefined
+  const ids = new Set(list.map(function (entry) { return entry && entry.id }).filter(Boolean))
+  return ids.has(dshSessionId)
 }
 
 /**
