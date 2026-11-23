@@ -5,10 +5,15 @@
 // - 时间线由 db.js 的 timeline / timelineMarkdown 提供，这里 re-export，调用方只依赖 store.js 亦可。
 import { fail, requireProjectId, timeline, timelineMarkdown } from './db.js'
 import { newId, nowIso, jsonText, parseJson } from './util.js'
+import { ROLE_WORDS, READONLY_ROLES } from './project-defaults.js'
 
 export { timeline, timelineMarkdown }
 
-export const SESSION_ROLES = ['产品', 'UX', '架构', '码农', '测试', '发布', '复盘']
+// 角色词表的唯一来源是 project-defaults.ROLE_WORDS（这里 re-export，避免两处各写一份——
+// v6 加「调研」时踩到的正是这个：改了一处、另一处还在拦）。
+export const SESSION_ROLES = ROLE_WORDS
+/** 只读角色：不占切片租约（见 project-defaults.READONLY_ROLES 的取舍说明）。 */
+export const SESSION_READONLY_ROLES = READONLY_ROLES
 export const PM_SESSION_NAME = '项目办公室'
 // qa（v5）：独立验收会话。它不算 task —— 不算 task 就不会去抢租约写作用域，
 // 也不会被「同切片同角色只能一个 active」挡在验收这一步之外。

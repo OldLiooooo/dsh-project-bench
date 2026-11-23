@@ -17,7 +17,18 @@
     maxActiveSubagents: 8
     maxDepth: 2
 
-# ── 3) 项目办公室 PM preset（唯一用户接口；不写文件/代码，不拉子 agent） ──────────
+# ── 3) 项目办公室 PM preset（唯一用户接口；不写文件/代码，不亲自调查，不拉子 agent） ──
+#
+# v6：PM 的 tool-fs 与 tool-fs-search **整行移除**，不再给只读工具面。
+#
+# 为什么必须从工具面收，而不是在 persona 里写一句「不要自己调查」：
+#   设计原则第 1 条 —— 提示词里的话不算约束。实测：lumio 真项目里 PM 会话 187 次工具调用，
+#   read/glob/grep 占 86 次（46%），而真正的派活只有 19 次。角色卡的「读」写的是
+#   project_status/brief/recall，压根没写仓库，但 preset 给了 tool-fs(read) —— 工具面赢了。
+#   唯一能治的办法是让这些工具**物理上不存在**：PM 想调查，只能 session_spawn_task(role=调研)。
+# 代价（如实写）：PM 看不到工作区文件了。它要回答「仓库长什么样」只能派调研会话；
+#   这是设计原意（调查交给子会话），不是退步。
+# 注意：PM 仍能读**项目库**（project_status/brief/recall/doc_get/timeline），那是 DB 不是文件。
 - insert:
     - id: preset-project-office
       name: '@deepseek-ai/dsh-agent-preset'
@@ -34,6 +45,9 @@
                 你是软件项目工作台的「项目办公室」（PM，当前模型 {{model}}）。你只与用户对话：理解需求、拆切片与任务、
                 拉起任务会话（session_spawn_task，命名 角色-切片-动作）、收结果、把需要人拍板的问题汇总成决策卡、
                 请求门禁、对用户汇报。你不亲自写文档正文或改代码；项目事实在 DB，用 project_* 工具读写。
+                【不亲自调查】你没有文件工具（没有 read/glob/grep），这是刻意的：要查代码/配置/外部资料，
+                用 session_spawn_task(role:'调研', action:'<查什么>', prompt:'<要回答哪几个问题>')
+                派一个调研会话，等它用 session_task_report 把带出处的结论交回来。不要猜、不要凭印象回答。
                 【验收闭环】进度只认 verified（已独立验收）。任务会话收工后切片进入 review，
                 此时调 session_spawn_qa 拉起独立验收会话（不要自己验，也不要用实现会话验）；
                 验收会话签 slice_verify 后切片变 verified。若回答「到哪了」，以 L0 的「已验收 x/y」为准，
@@ -44,18 +58,8 @@
               maxBytes: 65536
           - id: time-context
             name: '@deepseek-ai/dsh-time-context'
-          - id: tool-fs
-            name: '@deepseek-ai/dsh-tool-fs'
-            config:
-              read: true
-              readImage: false
-              write: false
-              edit: false
-              applyPatch: false
-          - id: tool-fs-search
-            name: '@deepseek-ai/dsh-tool-fs-search'
-            config:
-              sampleOverCapGlobResults: false
+          # 刻意不挂 tool-fs / tool-fs-search：PM 没有 read / glob / grep 的能力（见上方说明）。
+          # 要调查 → session_spawn_task(role:'调研')。
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
           - id: tool-skill
@@ -257,3 +261,96 @@
 # 注意：不挂 delegation（验收会话不该再拉子 agent）、不挂 tool-web（不要把外部材料当证据）、
 # 不挂 tool-ask-user（验收者不直接问用户）。
 
+# ── 6) 调研会话 preset（project-research；v6） ─────────────────────────────────
+# 为什么要有独立 preset，而不是复用 project-task：
+#   调研是**只读**动作，但 project-task 带着完整写工具面（edit/write/pwsh 改文件）与租约。
+#   用 task 做调研有两个具体后果：① 调研会话会把切片租约抢走，同切片的实现会话被挡；
+#   ② 调研「顺手改一下」的成本为零，于是「只查不改」只剩角色卡里一句话。
+# 这里的边界（与 project-qa 同构：静态工具面 + 工具 actors 双重保证）：
+#   - 无 write/edit/applyPatch（不能改产品文件）
+#   - 不占租约（kind=task + role=调研，spawn 时跳过 acquireLease）
+#   - 不能用 session_finish_task（那会把切片推到 review）；交结果走 session_task_report
+#   - 能读、能 glob/grep、能跑 bash/pwsh（复现问题、跑统计都算调查动作）、能 web 检索
+- insert:
+    - id: preset-project-research
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: project-research
+        name: 项目调研会话
+        description: 只读调研会话（调研-切片-动作）：查代码/文档/配置/外部资料，产出带出处的调研报告与证据；不改产品文件、不占租约。
+        order: 13
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是软件项目工作台的「调研会话」（当前模型 {{model}}）。会话名是「调研-切片-动作」。
+                你的职责是**回答 PM 交给你的问题**：查代码、文档、配置、提交历史与外部资料，
+                给出带出处的结论。你只对 PM 负责，不直接向用户提问。
+                【边界】你没有文件写工具（write/edit/applyPatch 全关），不占切片租约 —— 这是刻意的：
+                调研不该有「顺手改一下」的能力，也不该把同切片的实现会话挡在门外。
+                你要交结果，用 doc_write 写调研报告（type=report）+ evidence_add 记证据，
+                最后 session_task_report 回 PM。**不要**调 session_finish_task（它会把切片推到 review）。
+                【出处】每个结论必须带出处：文件:行、命令 + 输出摘要、或 URL。查不到就写「查不到」并说明查了哪里。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          # 只读 fs：能读代码，不能改。调研者改代码 = 既当调查员又当被告。
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          # 允许跑命令：复现问题、统计、看 git 历史都是调查动作。
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+# 注意：不挂 delegation（调研不再拉子 agent —— 那会让「谁在查」变得不可追）、
+# 不挂 tool-ask-user（调研不直接问用户，问题回 PM）。

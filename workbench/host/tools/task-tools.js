@@ -4,7 +4,7 @@ import { fail } from '../db.js'
 import { nowIso } from '../util.js'
 import { notifyPm, invalidateActorCache } from '../orchestration.js'
 import { validateFinish, scopePolicyOf } from '../scope.js'
-import { checkDeliverableType } from '../project-defaults.js'
+import { checkDeliverableType, isReadonlyRole } from '../project-defaults.js'
 
 /** project.json（缺失/读取失败时返回 undefined —— 由 checkDeliverableType 当作「不约束」）。 */
 function projectJsonOf(deps, actor) {
@@ -135,13 +135,17 @@ export const docWrite = {
       // 只拦「新建文档」：给已有文档追加新版本时类型已经定了，再拦只会把正常返工卡死。
       const stageRow = currentStageOf(deps, db)
       const stageKey = stageRow ? stageRow.key : undefined
-      const policyCheck = checkDeliverableType(projectJsonOf(deps, actor), stageKey, type)
+      // 调研报告不参与阶段交付物校验：它不是本阶段的交付物，而是回答 PM 问题的调查结论，
+      // 会横跨多个阶段（S1 只允许 prd，但调研当然可以在 S1 写 report）。
+      const policyCheck = isReadonlyRole(actor.role)
+        ? { allowed: true, enforced: false, reason: '只读角色（调研）的报告不受阶段交付类型约束' }
+        : checkDeliverableType(projectJsonOf(deps, actor), stageKey, type)
       if (!policyCheck.allowed) {
         throw fail('STAGE_DELIVERABLE_NOT_ALLOWED', policyCheck.reason, {
           stage: policyCheck.stageKey, allowedTypes: policyCheck.allowedTypes, requestedType: type,
         })
       }
-      const logicalKey = optionalText(args.logicalKey) || (type + '/' + slice.key)
+      const logicalKey = optionalText(args.logicalKey) || (isReadonlyRole(actor.role) ? 'report/research-' + slice.key + '-' + String(actor.session ? actor.session.id : '').slice(-8) : type + '/' + slice.key)
       doc = deps.docs.findDocumentByLogicalKey(db, logicalKey)
       if (!doc) {
         const stage = currentStageOf(deps, db)
@@ -160,7 +164,9 @@ export const docWrite = {
     }
     const sliceId = doc.sliceId || actor.sliceId
     if (!sliceId) throw fail('INVALID', '文档没有关联切片，无法校验写作用域')
-    deps.leases.assertWriteScope(db, { sliceId: sliceId, sessionId: actor.session.id })
+    // 只读角色不持租约（见 orchestration.spawnTaskSession）：它写的是 DB 里的调研报告，
+    // 不是切片产物，所以既不占写作用域，也不该被别人的租约挡住（查资料时同切片可能正在实现）。
+    if (!isReadonlyRole(actor.role)) deps.leases.assertWriteScope(db, { sliceId: sliceId, sessionId: actor.session.id })
     const written = deps.docs.writeDocumentVersion(db, {
       docId: doc.id,
       content: content,
@@ -196,7 +202,8 @@ export const evidenceAdd = {
   execute: async function (args, _exec, actor, deps) {
     const sliceId = requireSliceId(actor, optionalText(args.sliceId))
     // 验收会话不占租约（它不写工作区），跳过写作用域校验；任务会话必须过租约。
-    if (actor.kind === 'task') deps.leases.assertWriteScope(actor.db, { sliceId: sliceId, sessionId: actor.session.id })
+    // v6：只读角色（调研）同样不持租约，跳过——否则它会被同切片正在实现的会话的租约挡住。
+    if (actor.kind === 'task' && !isReadonlyRole(actor.role)) deps.leases.assertWriteScope(actor.db, { sliceId: sliceId, sessionId: actor.session.id })
     const contextTaskId = actor.session && actor.session.context ? actor.session.context.taskId : undefined
     const evidence = deps.store.addEvidence(actor.db, {
       sliceId: sliceId,
@@ -227,6 +234,10 @@ export const sessionTaskReport = {
     const db = actor.db
     const slice = deps.store.getSlice(db, actor.sliceId)
     if (!slice) throw fail('INVALID', '任务会话未绑定有效切片')
+    // v6：只读角色（调研）的「交结果」就是它的收工 —— 它不能用 session_finish_task（会推进切片），
+    // 所以必须在 report 这条路径上真正结束会话并释放位置，否则 DB 里会留一条永远 active 的调研会话，
+    // 且同(切片,角色)唯一性会挡住「再派一次调研」。
+    const readonlyFinish = isReadonlyRole(actor.role)
     let handoffDoc
     const handoff = optionalText(args.handoff)
     if (handoff) {
@@ -237,13 +248,28 @@ export const sessionTaskReport = {
     const notified = await notifyPm(_ctxOf(deps, _exec), deps, db, {
       senderAgent: _exec && _exec.agent,
       signal: _exec && _exec.signal,
-      text: '【任务会话 ' + actor.name + '】' + message + (handoffDoc ? '（已写交接文档 v' + handoffDoc.version.version + '）' : ''),
+      text: (isReadonlyRole(actor.role) ? '【调研会话 ' : '【任务会话 ') + actor.name + '】' + message
+        + (handoffDoc ? '（已写交接文档 v' + handoffDoc.version.version + '）' : '')
+        + (isReadonlyRole(actor.role) ? '\n【已收工】调研会话交结果即结束；切片状态未改动（调研不推进切片）。' : ''),
     })
+    // 只读角色：report = 收工。结束会话但不改切片状态、不释放别人的租约（它本来就没租约）。
+    let ended = null
+    if (readonlyFinish) {
+      try {
+        ended = deps.store.endSession(db, {
+          id: actor.session.id,
+          status: 'done',
+          handoffId: handoffDoc ? handoffDoc.doc.id : undefined,
+        })
+        invalidateActorCache(actor.dshSessionId)
+      } catch (error) { /* 结束失败不阻断交付 */ }
+    }
     notifyWrite(deps, actor)
     return {
       reported: true,
       handoff: handoffDoc ? { docId: handoffDoc.doc.id, version: handoffDoc.version.version } : null,
       notified: notified,
+      ...(ended ? { finished: true, note: '调研会话已结束（切片状态未改动）' } : {}),
     }
   },
 }
@@ -272,6 +298,15 @@ export const sessionFinishTask = {
     const status = optionalText(args.status) || 'done'
     if (status !== 'done' && status !== 'failed') throw fail('INVALID', 'status 必须是 done 或 failed')
     const handoff = requireText(args.handoff, 'handoff')
+    // v6：只读角色（调研）不能收工——session_finish_task 会把切片推到 review/blocked，
+    // 而调研不产出切片交付物。它能不接受这条约束，等于让「只查不改」的角色悄悄改状态。
+    // 调研交结果走 session_task_report（工具描述与角色卡都这么写）。
+    if (isReadonlyRole(actor.role)) {
+      throw fail('PERMISSION_DENIED', '只读角色（' + actor.role + '）不能调用 session_finish_task：它会把切片状态推进到 review/blocked，而调研不产出切片交付物。请用 session_task_report 把调研结论交回 PM；报告用 doc_write、证据用 evidence_add。', {
+        role: actor.role,
+        hint: 'session_task_report({ message, handoff })',
+      })
+    }
     if (args.noOutOfScopeChanges !== true) {
       throw fail('INVALID', '收工必须显式声明片外零改动：noOutOfScopeChanges=true。若确有片外改动，先用 session_task_report 回 PM，由 PM 调整切片/写决策后再收工。')
     }

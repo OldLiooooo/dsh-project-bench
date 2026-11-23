@@ -4,9 +4,21 @@ import { randomUUID } from 'node:crypto'
 import { fail } from './db.js'
 import { findProjectRoot, estimateTokens, truncateToTokens } from './util.js'
 import { compileContext } from './context.js'
-import { roleCardText, taskSessionName } from './roles.js'
+import { roleCardText, taskSessionName, isReadonlyRole } from './roles.js'
 
-export const PROJECT_PRESETS = Object.freeze(['project-office', 'project-task', 'project-qa'])
+export const PROJECT_PRESETS = Object.freeze(['project-office', 'project-task', 'project-qa', 'project-research'])
+
+/**
+ * 角色 → 子会话 preset。
+ *
+ * 为什么按角色分 preset 而不是全部用 project-task：preset 是**工具面的硬边界**
+ * （设计原则 1：提示词不算约束）。调研会话必须没有写文件工具，否则「只查不改」
+ * 就只有角色卡里一句话在守。qa 已经是这个思路（project-qa），v6 把调研补上。
+ */
+export function presetForRole(role) {
+  if (role === '调研') return 'project-research'
+  return 'project-task'
+}
 // qa（v5）：独立验收会话。它属于项目会话（能看项目工具），但只拿读 + 验收相关的最小工具面，
 // 用 preset 的静态工具面 + 工具 actors 双重收紧 —— 「建造者不验收」不能只靠角色卡里那句话。
 export const PROJECT_ACTOR_KINDS = Object.freeze(['pm', 'task', 'qa'])
@@ -245,10 +257,18 @@ export function buildTaskAssignment(input) {
     }
     lines.push('')
     lines.push('## 纪律')
-    lines.push('1) 只写本切片写作用域内的代码/文档；片外零改动（收工会用真实 git diff 校验）。')
-    lines.push('2) 需要人拍板的问题用 session_task_report 回 PM，不要直接问用户。')
-    lines.push("3) 收工前用 evidence_add 记录证据（≥1 条），doc_write 写交接，最后 session_finish_task(status:'done', noOutOfScopeChanges:true)。")
-    lines.push('4) 按需 project_recall/doc_get 查询；不要把整篇文档塞回上下文。')
+    if (isReadonlyRole(role)) {
+      // 只读角色（调研）的纪律与写者不同：它不改切片状态，交结果只走 report。
+      lines.push('1) 只读：不改产品文件、不改代码/测试/文档正文；你只写调研报告（doc_write type=report）与证据。')
+      lines.push('2) 每个结论必须带出处（文件:行 / 命令+输出摘要 / URL）；查不到就写「查不到」并说明查了哪里。')
+      lines.push('3) 收工用 session_task_report 把结论交回 PM；**不要**调 session_finish_task（那会推进切片状态）。')
+      lines.push('4) 按需 project_recall/doc_get 查询；不要把整篇文档塞回上下文。')
+    } else {
+      lines.push('1) 只写本切片写作用域内的代码/文档；片外零改动（收工会用真实 git diff 校验）。')
+      lines.push('2) 需要人拍板的问题用 session_task_report 回 PM，不要直接问用户。')
+      lines.push("3) 收工前用 evidence_add 记录证据（≥1 条），doc_write 写交接，最后 session_finish_task(status:'done', noOutOfScopeChanges:true)。")
+      lines.push('4) 按需 project_recall/doc_get 查询；不要把整篇文档塞回上下文。')
+    }
     return lines.join('\n')
   }
   let briefText = brief ? String(brief) : ''
@@ -325,14 +345,25 @@ export async function spawnTaskSession(ctx, deps, input) {
       spawnedBy: actor.dshSessionId,
     },
   })
+  // v6：只读角色（调研）不占写作用域租约。
+  //
+  // 租约的语义是「同一切片同时只有一个**写者**」，不是「同一切片同时只有一个会话」。
+  // 让调研持租会把同切片的实现会话挡在门外 —— 拿写锁当排队用，正好是本末倒置。
+  // 代价：调研会话没有写作用域，所以它在 doc_write/evidence_add 上仍会被自己的
+  // actors/readonly 校验挡住（不会偷偷写），见 task-tools.js。
+  const readonly = isReadonlyRole(role)
   let lease
   try {
-    lease = deps.leases.acquireLease(db, {
-      sliceId: slice.id,
-      sessionId: session.id,
-      ttlMs: deps.leases.DEFAULT_LEASE_TTL_MS,
-      reason: 'task session spawn: ' + name,
-    })
+    if (readonly) {
+      lease = undefined
+    } else {
+      lease = deps.leases.acquireLease(db, {
+        sliceId: slice.id,
+        sessionId: session.id,
+        ttlMs: deps.leases.DEFAULT_LEASE_TTL_MS,
+        reason: 'task session spawn: ' + name,
+      })
+    }
   } catch (error) {
     try {
       deps.store.endSession(db, {
@@ -385,12 +416,9 @@ export async function spawnTaskSession(ctx, deps, input) {
       provider: 'spawn',
       childId: dshSessionId,
       label: name,
-      // 契约（@deepseek-ai/dsh-subagent 0.2.2-rc.5 实测）：prompt / parent / agentPreset 是**顶层字段**。
-      // 之前包在 request 里，DSH 侧 manager.startLocal 的 const parent = spec.parent 拿到 undefined，
-      // 派活 100% 失败（错误只有一句 Cannot read properties of undefined (reading 'id')）。
       prompt: [{ type: 'text', text: assignment.text }],
       parent: parentAgent,
-      agentPreset: 'project-task',
+      agentPreset: presetForRole(role),
       ...(Object.keys(agentOptions).length > 0 ? { agentOptions } : {}),
       signal,
     })
