@@ -23,7 +23,8 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const EXPECTED_TOOLS = [
   'artifact_add', 'decision_create', 'doc_export', 'doc_freeze', 'doc_get', 'doc_list', 'doc_write',
   'evidence_add', 'export_project', 'file_index', 'gate_submit', 'import_inbox', 'project_brief',
-  'project_init', 'project_status', 'project_recall', 'session_finish_task', 'session_send_task',
+  'project_init', 'project_status', 'project_recall', 'scope_policy', 'session_finish_qa',
+  'session_finish_task', 'session_send_task',
   'period_roll', 'session_spawn_qa', 'session_spawn_task', 'session_task_report', 'slice_create',
   'slice_list', 'slice_scope', 'slice_update', 'slice_verify', 'task_create', 'task_list', 'task_update',
   'weekly_report',
@@ -172,7 +173,7 @@ function assertToolError(promise, code) {
   })
 }
 
-test('工具清单与契约一致（31 个，含 v4 的 slice_scope 与 v5 的 slice_verify/session_spawn_qa/period_roll/weekly_report），且都带 JSON Schema 参数与输出声明', (t) => {
+test('工具清单与契约一致（33 个：v4 的 slice_scope、v5 的 slice_verify/session_spawn_qa/period_roll/weekly_report、v6.3 的 scope_policy/session_finish_qa），且都带 JSON Schema 参数与输出声明', (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const catalog = toolCatalog(env.ctx, env.deps)
@@ -191,14 +192,14 @@ test('工具清单与契约一致（31 个，含 v4 的 slice_scope 与 v5 的 s
   }
 })
 
-test('when 过滤：PM 看 27 个、任务会话看 15 个、验收会话看 9 个、普通/子 agent 看 0 个', async (t) => {
+test('when 过滤：PM 看 28 个、任务会话看 16 个、验收会话看 10 个、普通/子 agent 看 0 个', async (t) => {
   const env = createEnv()
   t.after(() => env.dispose())
   const pm = createPm(env)
   const slice = createSlice(env)
   const task = createTaskSession(env, slice)
   const pmVisible = visibleToolNames(env, pm.agent)
-  assert.equal(pmVisible.length, 27)
+  assert.equal(pmVisible.length, 28)
   assert.ok(pmVisible.includes('session_spawn_task'))
   assert.ok(pmVisible.includes('project_status'))
   assert.ok(pmVisible.includes('gate_submit'))
@@ -207,7 +208,9 @@ test('when 过滤：PM 看 27 个、任务会话看 15 个、验收会话看 9 �
     assert.ok(!pmVisible.includes(hidden), 'PM 不应看到 ' + hidden)
   }
   const taskVisible = visibleToolNames(env, task.agent)
-  assert.equal(taskVisible.length, 15)
+  assert.equal(taskVisible.length, 16)
+  // v6.4（lumio P2-2）：任务会话也能导入外部产物 —— 否则 imports 表恒空，外部材料无从溯源。
+  assert.ok(taskVisible.includes('import_inbox'), '任务会话应能 import_inbox（限本切片）')
   assert.ok(taskVisible.includes('doc_write'))
   assert.ok(taskVisible.includes('session_finish_task'))
   for (const hidden of ['session_spawn_task', 'session_send_task', 'gate_submit', 'export_project', 'project_init', 'slice_verify']) {
@@ -218,9 +221,9 @@ test('when 过滤：PM 看 27 个、任务会话看 15 个、验收会话看 9 �
   const qaVisible = visibleToolNames(env, qa.agent)
   assert.deepEqual(qaVisible.slice().sort(), [
     'doc_get', 'doc_list', 'evidence_add', 'project_brief', 'project_recall',
-    'project_status', 'slice_list', 'slice_verify', 'task_list',
+    'project_status', 'session_finish_qa', 'slice_list', 'slice_verify', 'task_list',
   ])
-  for (const hidden of ['doc_write', 'doc_freeze', 'session_finish_task', 'session_task_report', 'gate_submit', 'slice_create']) {
+  for (const hidden of ['doc_write', 'doc_freeze', 'session_finish_task', 'session_task_report', 'gate_submit', 'slice_create', 'scope_policy']) {
     assert.ok(!qaVisible.includes(hidden), '验收会话不应看到 ' + hidden)
   }
   // 非项目会话（standard preset）与子 agent 整组隐藏

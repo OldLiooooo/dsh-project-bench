@@ -407,12 +407,29 @@ export async function spawnTaskSession(ctx, deps, input) {
   }
   // 栅栏令牌落进会话上下文：之后所有写路径都会拿它与当前租约 epoch 比对（抢占后必然不符）。
   const fenceEpoch = lease ? Number(lease.epoch) : undefined
-  if (fenceEpoch !== undefined) {
-    try {
-      deps.store.updateSession(db, { id: session.id, context: { ...session.context, taskId: task ? task.id : undefined, fenceEpoch } })
-      session.context = { ...session.context, fenceEpoch }
-    } catch (error) { /* 令牌写不进去时不阻断派活；写路径会退化为 holder 校验 */ }
+  // 工作树 baseline 快照（v6.4）：收工时用它把「本次会话的改动」与「别人留下的脏状态」分开。
+  //
+  // 为什么必须在 spawn 时拍：越晚拍，越可能把别人的改动算进本次会话。
+  // 为什么可以无条件拍：captureWorkspaceSnapshot 只写对象库 + 临时索引，不改工作树、不动真索引，
+  // 拍不出来（无 git/沙箱禁 spawn）时返回 undefined，收工时会如实降级为整树口径并标注。
+  let baselineSnapshot
+  try {
+    const snapRoot = actor.cwd || actor.root
+    baselineSnapshot = deps.scope && typeof deps.scope.captureWorkspaceSnapshot === 'function'
+      ? deps.scope.captureWorkspaceSnapshot(snapRoot, { tag: 'spawn' })
+      : undefined
+  } catch (error) { baselineSnapshot = undefined }
+  const contextPatch = {
+    taskId: task ? task.id : undefined,
+    ...(fenceEpoch !== undefined ? { fenceEpoch } : {}),
+    ...(baselineSnapshot ? { baselineSnapshot } : {}),
+    // 会话自己的 cwd：worktree 隔离时它与项目根不同（lumio P1-2）。
+    ...(actor.cwd && actor.cwd !== actor.root ? { worktree: actor.cwd } : {}),
   }
+  try {
+    deps.store.updateSession(db, { id: session.id, context: { ...session.context, ...contextPatch } })
+    session.context = { ...session.context, ...contextPatch }
+  } catch (error) { /* 上下文写不进去时不阻断派活；收工会退化为整树口径 */ }
   let taskAdvanced = false
   if (task && typeof deps.store.updateTask === 'function') {
     try {
@@ -588,7 +605,12 @@ export function reconcileStaleSessions(ctx, registry, deps) {
     if (!db) continue
     result.projects += 1
     let rows = []
-    try { rows = deps.store.listSessions(db, { kind: 'task', status: 'active' }) } catch (error) { rows = [] }
+    // v6.3：重启对账必须连 qa 一起扫。原先只扫 task，验收会话永远清不掉 ——
+    // 「进程重启也解不开」（lumio P0-3）就是这么来的。qa 行没有租约，下面释放租约那段对它天然跳过。
+    try {
+      rows = deps.store.listSessions(db, { kind: 'task', status: 'active' })
+        .concat(deps.store.listSessions(db, { kind: 'qa', status: 'active' }))
+    } catch (error) { rows = [] }
     for (const row of rows) {
       result.checked += 1
       if (row.dshSessionId && live.has(row.dshSessionId)) continue

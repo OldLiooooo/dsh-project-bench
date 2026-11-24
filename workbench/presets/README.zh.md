@@ -33,13 +33,17 @@
 |---|---|
 | 不写文件 | preset 里 `tool-fs` 的 `write/edit/applyPatch` 全 false；并且工具层没有任何文件写工具 |
 | 不占租约 | 会话 `kind='qa'`，不进 `kind='task'` 的租约路径；`evidence_add` 对它跳过 `assertWriteScope` |
-| 只能记证据 + 签字 | 工具 actors 里只有 `evidence_add` 与 `slice_verify` 允许 `qa`；`doc_write` / `session_finish_task` 等对它是隐藏的 |
+| 只能记证据 + 签字 + 离场 | 工具 actors 里只有 `evidence_add`、`slice_verify`、`session_finish_qa` 允许 `qa`；`doc_write` / `session_finish_task` 等对它是隐藏的 |
 
 另外**故意不挂**：`delegation`（验收会话不该再拉子 agent）、`tool-web`（别把外部材料当证据）、
 `tool-ask-user`（验收者不直接问用户）。
 
-验收会话能看到 9 个工具：`project_status` `project_brief` `project_recall` `doc_list` `doc_get`
-`task_list` `slice_list` `evidence_add` `slice_verify`。
+验收会话能看到 10 个工具：`project_status` `project_brief` `project_recall` `doc_list` `doc_get`
+`task_list` `slice_list` `evidence_add` `slice_verify` `session_finish_qa`。
+
+`session_finish_qa`（v6.3）是**离场出口**，不是签字入口：它只结束自己，不改切片状态。
+为什么必须有它：旧版验收会话没有任何结束路径（`session/disposed` 与重启对账都只扫 `kind='task'`），
+真库实测 4/4 QA 会话签完字仍永久 active，同切片再也拉不起复验 —— 每个切片实际只能被验收一次。
 
 ## 命名与唯一性
 

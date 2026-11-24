@@ -1,5 +1,7 @@
 // 任务会话工具（T4）：doc_write / evidence_add / session_task_report / session_finish_task。
 // 仅 project-task 会话可见；写操作受切片租约（assertWriteScope）约束。
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { fail } from '../db.js'
 import { nowIso } from '../util.js'
 import { notifyPm, invalidateActorCache } from '../orchestration.js'
@@ -285,10 +287,64 @@ function _ctxOf(deps, _exec) {
   return deps.ctx
 }
 
+/**
+ * 收工被拒的收尾：写 scope/reject 事件 -> 结束会话 -> 释放租约。
+ *
+ * 为什么「被拒也要结束会话」：拒绝的本意是「这次交付不合格」，不是「你可以继续挂着」。
+ * 原实现把 throw 放在 endSession 之前，于是被拒的会话停在 active、还持有切片写锁到 TTL 到期，
+ * 同切片的下一个会话连进场都进不来（LEASE_HELD）；而这一整套失败又没有任何事件留痕。
+ * 现在：拒绝先落一条可复核事件（哪些文件、哪个策略），再让会话以 failed 离场并释放租约。
+ * 补完/回滚后重派一次即可，不需要等 TTL。
+ */
+function rejectFinish(deps, actor, input) {
+  const db = actor.db
+  const scopeCheck = input.scopeCheck || {}
+  const detail = '作用域校验未通过（policy=' + String(scopeCheck.policy || '-')
+    + ', verifiable=' + String(scopeCheck.verifiable === true)
+    + '）：' + (Array.isArray(scopeCheck.issues) ? scopeCheck.issues.map(function (issue) { return issue.message }).join('；') : '')
+  try {
+    db.tx(function () {
+      db.appendEvent({
+        kind: 'scope/reject',
+        sliceId: input.sliceId,
+        subjectType: 'session',
+        subjectId: actor.session.id,
+        actorSession: actor.dshSessionId,
+        role: actor.role,
+        payload: {
+          status: input.status,
+          policy: scopeCheck.policy,
+          attribution: scopeCheck.attribution,
+          basis: scopeCheck.basis,
+          verifiable: scopeCheck.verifiable === true,
+          counts: scopeCheck.counts,
+          outOfScope: Array.isArray(scopeCheck.outOfScope) ? scopeCheck.outOfScope.slice(0, 40) : [],
+          crossScope: Array.isArray(scopeCheck.crossScope) ? scopeCheck.crossScope.slice(0, 40) : [],
+          declared: scopeCheck.declared,
+          issues: Array.isArray(scopeCheck.issues) ? scopeCheck.issues : [],
+        },
+      })
+      return true
+    })
+  } catch (error) { /* 事件写失败不能阻断离场：离场比留痕更重要 */ }
+  try {
+    deps.store.endSession(db, {
+      id: actor.session.id,
+      // 会话以 failed 结束：它确实没交付。用 interrupted 会让重启对账误以为「进程重启打断」，
+      // 而这里的原因是可复核的（scope/reject 事件 + failureCode）。
+      status: 'failed',
+      failureCode: 'OUT_OF_SCOPE_CHANGES',
+      failureDetail: detail.slice(0, 500),
+    })
+  } catch (error) { /* 结束失败也不阻断抛错：调用方仍会看到明确拒绝 */ }
+  try { deps.leases.releaseLease(db, { sliceId: input.sliceId, sessionId: actor.session.id }) } catch (error) { /* 租约本就不属于它 */ }
+  try { invalidateActorCache(actor.dshSessionId) } catch (error) { /* 缓存失效失败不阻断 */ }
+}
+
 /** session_finish_task：任务会话收工（校验 handoff + 证据≥1 + 片外零改动声明）。 */
 export const sessionFinishTask = {
   name: 'session_finish_task',
-  description: '任务会话收工。硬校验：handoff 正文非空、证据 ≥1 条（evidenceIds 或已记录）、切片作用域校验（对真实 git diff，不再只认声明）、租约栅栏有效。通过后写交接文档、结束会话、释放租约、通知 PM。',
+  description: '任务会话收工。硬校验：handoff 正文非空、证据 ≥1 条（evidenceIds 或已记录）、租约栅栏有效；status=done 时还要过切片作用域校验（对真实 git diff，不再只认声明）。status=failed 时片外改动只报告不拦截（如实记录失败不该被存量脏改动堵死），但改动其它切片作用域仍需显式接受。被拒时会话会被结束、租约会被释放并落 scope/reject 事件（不留 active 幽灵）。通过后写交接文档、结束会话、释放租约、通知 PM。',
   parameters: params({
     status: S('done | failed（默认 done）'),
     handoff: S('交接正文：做了什么、怎么验证、遗留/风险、下一步'),
@@ -297,7 +353,7 @@ export const sessionFinishTask = {
     noOutOfScopeChanges: B('必须为 true：声明本任务没有改切片写作用域之外的文件（实际是否越界由真实 diff 校验）'),
     failureCode: S('status=failed 时的失败码（如 TESTS_FAILED / BLOCKED_DEPENDENCY），会落库供对账查询'),
     failureDetail: S('status=failed 时的失败详情（可复核的一句话）'),
-    acceptedOutOfScope: B('片外改动已由 PM 接受时置 true（需同时给 outOfScopeReason；仅 scopePolicy=declare 生效）'),
+    acceptedOutOfScope: B('片外改动已由 PM 接受时置 true（需同时给 outOfScopeReason；仅 scopePolicy=declare/off 生效，PM 用 scope_policy 切换）'),
     outOfScopeReason: S('接受片外改动的理由'),
   }, ['handoff', 'noOutOfScopeChanges']),
   actors: ['task'],
@@ -351,15 +407,45 @@ export const sessionFinishTask = {
     // 旧实现只校验调用方「声明了」片外零改动 —— 声明永远能写 true，等于没校验。
     // 现在：能判定（有 git + 有声明）就真判；不能判定就如实标注 verifiable=false，
     // 而不是伪造一个「通过」（这才是「声明 ≠ 证据」的正确处理方式）。
+    // v6.3（lumio 真库 P0-1）：失败收工不再被 outOfScope 挡住。
+    //
+    // 实测现象：一个只想如实记录「本切片被环境卡住、没做完」的会话，以 status=failed 收工，
+    // 却被切片作用域校验拦下（校验先于 endSession 执行），于是它既不能成功也不能失败地离场，
+    // 还留一条 active 幽灵 + 30 分钟租约。删除那条与本次交付无关的片外文件后同一次调用立刻成功。
+    // 结论：这条校验在失败路径上把「诚实」变成了最贵的选项（谎报 done 反而不会被拒）。
+    //
+    // 修复分两层，缺一不可：
+    //   1) 判定层：status=failed 时 outOfScope 只报告不拦截（blockOutOfScope=false）；
+    //      crossScope 仍拦截 —— 改到别人已声明的地盘与本次成败无关，失败不能当作通行证。
+    //      但它同样降级成「显式接受可放行」：否则把别人未提交的存量当自家改动仍会把失败堵死。
+    //   2) 留痕层：无论放行还是拒绝，都写一条 scope/finish 或 scope/reject 事件；
+    //      拒绝路径**先结束会话、释放租约**再抛错 —— 不能留 active 幽灵。
+    const isFailedFinish = status === 'failed'
     let scopeCheck
     try {
       const projectJson = deps.registry && typeof deps.registry.projectJson === 'function' ? deps.registry.projectJson(actor.root) : undefined
-      scopeCheck = validateFinish(db, {
+      // 走 deps.scope（而不是直接调 import 进来的函数）：作用域判定要能按会话工作树采集 diff
+      // （lumio P1-2：校验固定读主工作树），可替换是本轮修复的前提；测试也靠它注入确定性 diff。
+      const validateFinishFn = deps.scope && typeof deps.scope.validateFinish === 'function' ? deps.scope.validateFinish : validateFinish
+      // 归因用会话自己的工作树与 baseline 快照（v6.4）：
+      //   - worktreeRoot：会话跑 git worktree 时，判定必须在**它自己的工作树**里做，
+      //     否则「工作树里干活干净、却被主树存量拒绝」（lumio P1-2）；
+      //   - baselineSnapshot：spawn 时拍的工作树快照，用来只算本次会话的改动（lumio P1-1）。
+      const context = (actor.session && actor.session.context) || {}
+      const worktreeRoot = typeof context.worktree === 'string' && context.worktree ? context.worktree : undefined
+      // 只在会话真的在独立工作树里干活时才切 root：切过去却拍不出快照（不是 git 仓库）
+      // 会让判定退化成「无法校验」，那比读主树更糟。
+      const scopeRoot = worktreeRoot && existsSync(join(worktreeRoot, '.git')) ? worktreeRoot : actor.root
+      scopeCheck = validateFinishFn(db, {
         sliceId: sliceId,
-        root: actor.root,
-        policy: scopePolicyOf(projectJson),
+        root: scopeRoot,
+        baselineSnapshot: context.baselineSnapshot,
+        policy: deps.scope && typeof deps.scope.scopePolicyOf === 'function' ? deps.scope.scopePolicyOf(projectJson) : scopePolicyOf(projectJson),
         acceptedOutOfScope: args.acceptedOutOfScope === true,
         outOfScopeReason: args.outOfScopeReason,
+        // 失败收工：片外存量不拦（见上）；成功了才拿它当门禁。
+        blockOutOfScope: !isFailedFinish,
+        acceptCrossScope: args.acceptedOutOfScope === true,
       })
     } catch (error) {
       scopeCheck = {
@@ -371,8 +457,13 @@ export const sessionFinishTask = {
       }
     }
     if (!scopeCheck.ok) {
-      throw fail('OUT_OF_SCOPE_CHANGES', '收工被拒：切片作用域校验未通过 —— ' + scopeCheck.issues.map(function (issue) { return issue.message }).join('；'), {
+      // 拒绝路径必须留痕 + 必须离场。原实现在 endSession 之前 throw，于是：
+      // a) 事件表里查不到任何作用域拒绝（lumio 真库搜 8 类错误码命中 0，误报次数无法复核）；
+      // b) 会话停在 active、还持有租约，只能等 30 分钟 TTL —— 比失败更糟。
+      rejectFinish(deps, actor, { sliceId: sliceId, status: status, scopeCheck: scopeCheck })
+      throw fail('OUT_OF_SCOPE_CHANGES', '收工被拒（会话已结束、租约已释放，可补完再收工）—— ' + scopeCheck.issues.map(function (issue) { return issue.message }).join('；'), {
         sliceId: sliceId,
+        sessionEnded: true,
         scope: {
           policy: scopeCheck.policy, basis: scopeCheck.basis, verifiable: scopeCheck.verifiable,
           counts: scopeCheck.counts, outOfScope: scopeCheck.outOfScope, crossScope: scopeCheck.crossScope,
@@ -389,6 +480,31 @@ export const sessionFinishTask = {
     }
     const content = '# 交接：' + actor.name + '\n\n' + handoff + '\n'
     const handoffDoc = ensureHandoffDocument(deps, actor, slice, content)
+    // 作用域判定也是事实（v6.3）：成功路径同样落一条事件，
+    // 否则事后无法回答「这次收工到底校验了什么、什么策略、判定了几个文件」。
+    try {
+      db.tx(function () {
+        db.appendEvent({
+          kind: 'scope/finish',
+          sliceId: sliceId,
+          subjectType: 'session',
+          subjectId: actor.session.id,
+          actorSession: actor.dshSessionId,
+          role: actor.role,
+          payload: {
+            status: status,
+            policy: scopeCheck.policy,
+            basis: scopeCheck.basis,
+            verifiable: scopeCheck.verifiable === true,
+            counts: scopeCheck.counts,
+            outOfScope: Array.isArray(scopeCheck.outOfScope) ? scopeCheck.outOfScope.slice(0, 40) : [],
+            acceptedOutOfScope: args.acceptedOutOfScope === true,
+            blockOutOfScope: !isFailedFinish,
+          },
+        })
+        return true
+      })
+    } catch (error) { /* 事件写失败不阻断收工 */ }
     if (contextTaskId) {
       try { deps.store.updateTask(db, { id: contextTaskId, status: status === 'done' ? 'done' : 'failed' }) } catch (error) { /* 任务状态更新失败不阻断 */ }
     }
@@ -454,6 +570,13 @@ export const sessionFinishTask = {
       // 作用域校验结果必须回传：这是「片外零改动」从声明变成证据的那一步，人要看得到证据。
       scope: {
         policy: scopeCheck.policy,
+        // 失败收工时片外改动只是报告项（blockOutOfScope=false）；
+        // 回执必须把这个区别写出来，否则 PM 会以为「没被拦 = 校验过了」。
+        blockOutOfScope: !isFailedFinish,
+        // 归因口径：'session' 才是「只算本次会话的改动」；'workspace' 表示只能看整树，
+        // 可能被别人的未提交改动污染（无 baseline 快照的老会话就是这一档）。
+        attribution: scopeCheck.attribution,
+        attributionNote: scopeCheck.attributionNote,
         basis: scopeCheck.basis,
         baseline: scopeCheck.baseline,
         verifiable: scopeCheck.verifiable,

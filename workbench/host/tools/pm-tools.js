@@ -144,6 +144,51 @@ export const sliceScope = {
   },
 }
 
+// scope_policy：项目级收工作用域策略（v6.3）。
+//
+// 为什么必须有这个工具：v4 引入了 scopePolicy=declare 与 acceptedOutOfScope，但全仓没有任何写入方
+// （project-defaults.createProjectJson 不产出该键，只有 scope.js 在读）。结果是 lumio 真库上
+// 「由 PM 显式接受越界」这条通道整体不可达，PM 只能反复 slice_scope 加路径（实测 16 分钟内改了 4 次）。
+// 逃生门要么可达、要么不要存在；这里选前者，并把它做成需要写理由的显式动作。
+export const scopePolicy = {
+  name: 'scope_policy',
+  description: '查看/设置项目级收工作用域策略（strict|declare|off）。strict=片外改动一律拒绝（默认）；declare=片外改动需 PM 显式接受（session_finish_task 传 acceptedOutOfScope+outOfScopeReason）；off=只报告不拦。crossScope（改动其它切片已声明的地盘）任何策略下都不默认接受。',
+  parameters: params({
+    action: S('get | set（默认 get）'),
+    policy: S('strict | declare | off（set 必填）'),
+    reason: S('改成该策略的理由（set 必填，会落进事件时间线）'),
+  }, []),
+  actors: ['pm'],
+  execute: async function (args, _exec, actor, deps) {
+    const action = optionalText(args.action) || 'get'
+    if (action !== 'get' && action !== 'set') throw fail('INVALID', 'action 必须是 get / set')
+    const registry = deps.registry
+    const current = deps.scope.scopePolicyOf(registry && typeof registry.projectJson === 'function' ? registry.projectJson(actor.root) : undefined)
+    if (action === 'get') return { policy: current, configPath: 'project.json · scopePolicy' }
+    const next = requireText(args.policy, 'policy')
+    if (deps.scope.SCOPE_POLICIES.indexOf(next) < 0) throw fail('INVALID', 'policy 必须是 ' + deps.scope.SCOPE_POLICIES.join(' / '))
+    const reason = requireText(args.reason, 'reason')
+    if (!registry || typeof registry.updateProjectJson !== 'function') throw fail('UNAVAILABLE', 'registry 不支持写 project.json（配置写入入口未接线）')
+    const written = registry.updateProjectJson(actor.root, { scopePolicy: next })
+    // 配置变更也是事实：记进时间线，否则「谁把项目放宽到 off」事后无从查起。
+    try {
+      actor.db.tx(function () {
+        actor.db.appendEvent({
+          kind: 'project/config',
+          subjectType: 'project',
+          subjectId: actor.db.projectId,
+          actorSession: actor.dshSessionId,
+          role: actor.role,
+          payload: { key: 'scopePolicy', from: current, to: next, reason: reason.slice(0, 300), jsonPath: written.jsonPath },
+        })
+        return true
+      })
+    } catch (error) { /* 事件写失败不阻断配置生效，但调用方会看到 written 为真 */ }
+    notifyWrite(deps, actor)
+    return { policy: next, previous: current, changed: written.changed, reason: reason }
+  },
+}
+
 /**
  * slice_verify：验收切片（Verified Done）。
  *
@@ -355,7 +400,7 @@ export const sessionSendTask = {
  */
 export const sessionSpawnQa = {
   name: 'session_spawn_qa',
-  description: '拉起独立验收会话（project-qa）：不写文件、不占租约、只读工作区，产出验收证据并可调 slice_verify。用于里程碑门禁前的独立验证——「建造者不验收」的机制化落地。',
+  description: '拉起独立验收会话（project-qa）：不写文件、不占租约、只读工作区，产出验收证据、可调 slice_verify 签字，验完/拒完调 session_finish_qa 自己离场。用于里程碑门禁前的独立验证——「建造者不验收」的机制化落地。同切片同时只允许一个 active 验收会话（复验前需上一个已离场）。',
   parameters: params({
     sliceId: S('切片 id（与 sliceKey 二选一）'),
     sliceKey: S('切片 key（与 sliceId 二选一）'),
@@ -396,9 +441,12 @@ export const sessionSpawnQa = {
       'PM 交代：',
       brief,
       '',
-      'available 工具：project_status / project_brief / doc_list / doc_get / task_list / slice_list / evidence_add / slice_verify。',
+      'available 工具：project_status / project_brief / doc_list / doc_get / task_list / slice_list / evidence_add / slice_verify / session_finish_qa。',
       '做完后：evidence_add 记录可复核证据（原样贴命令与输出摘要），再调 slice_verify（verifiedBy 写人名）。',
       '如果没通过：**不要** slice_verify，用 evidence_add 记录失败证据，并在交接里写清缺陷与复现步骤。',
+      // v6.3：离场是必须的一步。没有它，这个切片再也拉不起复验（同切片只允许一个 active 验收会话）。
+      '无论过不过，**最后都要调 session_finish_qa(verdict=passed|rejected, summary=...) 离场**：',
+      '它只结束你自己，不改切片状态。不调它，这条会话会永久 active，同切片就再也拉不起复验。',
     ].join('\n')
     try {
       await ctx.subagents.startActivation({
@@ -772,10 +820,10 @@ export const exportProject = {
   },
 }
 
-/** import_inbox：PM 导入 .project/inbox 文件为文档新版本。 */
+/** import_inbox：导入 inbox 文件为文档新版本（PM 与任务会话；任务会话限本切片）。 */
 export const importInbox = {
   name: 'import_inbox',
-  description: '把 .project/inbox 下的外部产物（工作包/回执）导入为文档新版本（受控导入，双向同步不做）。',
+  description: '把 inbox 下的外部产物（工作包/回执）导入为文档新版本（受控导入，双向同步不做，会记 imports 行与 contentHash 供溯源）。搜索顺序：项目 store 的 inbox（权威数据所在）→ 工作区 .project/inbox（历史兼容）。任务会话与 PM 都可用。',
   parameters: params({
     path: S('inbox 内相对路径或绝对路径'),
     docId: S('目标文档 id（可选；给出则追加新版本）'),
@@ -784,19 +832,28 @@ export const importInbox = {
     logicalKey: S('新建文档逻辑键（可选）'),
     sliceId: S('关联切片 id（可选）'),
   }, ['path']),
-  actors: ['pm'],
+  // v6.4（lumio P2-2）：任务会话也要能导入。原先只有 PM 能调，任务会话只能走 doc_write，
+  // 于是 imports 表恒空 —— 所有文档都成了「AI 写的正文」，外部材料的来源与 hash 无从溯源。
+  // 任务会话受切片约束：只能导入到自己绑定的切片（见 execute 里的校验）。
+  actors: ['pm', 'task'],
   execute: async function (args, _exec, actor, deps) {
+    const wantsSlice = optionalText(args.sliceId)
+    if (actor.kind === 'task') {
+      if (!actor.sliceId) throw fail('PERMISSION_DENIED', '任务会话没有绑定切片，不能导入')
+      if (wantsSlice && wantsSlice !== actor.sliceId) throw fail('PERMISSION_DENIED', '任务会话只能导入到自己绑定的切片：' + actor.sliceId)
+    }
     const result = deps.importer.importInboxFile(actor.db, {
       sourcePath: requireText(args.path, 'path'),
       docId: optionalText(args.docId),
       type: optionalText(args.type),
       title: optionalText(args.title),
       logicalKey: optionalText(args.logicalKey),
-      sliceId: optionalText(args.sliceId),
+      // 任务会话不传 sliceId 时默认落到自己的切片：否则导入的文档会变成无归属的孤儿。
+      sliceId: wantsSlice || (actor.kind === 'task' ? actor.sliceId : undefined),
       importedBy: actor.dshSessionId,
     })
     notifyWrite(deps, actor)
-    return { imported: true, doc: result.doc, version: result.version ? result.version.version : undefined, created: result.created, sourcePath: result.sourcePath }
+    return { imported: true, doc: result.doc, version: result.version ? result.version.version : undefined, created: result.created, sourcePath: result.sourcePath, contentHash: result.contentHash }
   },
 }
 
@@ -835,5 +892,5 @@ export const docExport = {
 }
 
 export function createPmTools(_ctx, _deps) {
-  return [projectInit, sliceCreate, sliceUpdate, sliceScope, sliceVerify, taskCreate, sessionSpawnTask, sessionSpawnQa, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport, periodRoll, weeklyReport]
+  return [projectInit, sliceCreate, sliceUpdate, sliceScope, scopePolicy, sliceVerify, taskCreate, sessionSpawnTask, sessionSpawnQa, sessionSendTask, decisionCreate, gateSubmit, exportProject, importInbox, docExport, periodRoll, weeklyReport]
 }

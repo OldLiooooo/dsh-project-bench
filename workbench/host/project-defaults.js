@@ -73,6 +73,10 @@ export function createProjectJson(input) {
     name: input.name,
     root: input.root || '.',
     createdAt,
+    // v6.3：scopePolicy 以前没有任何写入方（全仓只有 scope.js 在读），于是"declare 策略"
+    // 在真实项目里根本不可达，acceptedOutOfScope 成了死参数（lumio P0-2）。
+    // 写在默认 project.json 里，PM 才有可能用 scope_policy 工具把它改掉。
+    scopePolicy: 'strict',
     stageTemplate: STAGE_TEMPLATE,
     exportMap: defaultExportMap(),
     budget: defaultBudget(),

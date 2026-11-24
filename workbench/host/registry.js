@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute as pathIsAbsolute, join, resolve } from 'node:path'
-import { ProjectDb } from './db.js'
+import { ProjectDb, fail } from './db.js'
 import { newId, nowIso, parseJson, sha256 } from './util.js'
 import * as projectDefaults from './project-defaults.js'
 import { mapSessionRow, listStages } from './snapshot.js'
@@ -518,6 +518,25 @@ export function createRegistry(ctx) {
     return readProjectJson(projectPaths(workspace.root).jsonPath)
   }
 
+  // v6.3 配置写入入口：改 project.json 的若干字段（浅合并，原子写）。
+  // 为什么需要它：scopePolicy 以前全仓只有读（scope.js:scopePolicyOf），默认 project.json 也不产出
+  // 这个键 —— 于是文档承诺的 declare 策略在真实项目里不可达，session_finish_task 的
+  // acceptedOutOfScope 变成死参数（lumio 真库反馈 P0-2）。入口放在 registry 而不是某个工具里，
+  // 是为了让「谁能改配置」在工具层显式声明（actors）。
+  // 语义：读 -> 浅合并 -> 原子写。文件不存在时报错，而不是凭空造一个缺了 stageTemplate/
+  // exportMap 的 project.json（那会把项目配置写残）。
+  function updateProjectJson(reference, patch) {
+    const workspace = rootForWorkspace(reference)
+    const jsonPath = projectPaths(workspace.root).jsonPath
+    const before = readProjectJson(jsonPath)
+    if (!before || typeof before !== 'object') throw fail('NOT_FOUND', 'project.json 不存在或不可解析：' + jsonPath)
+    const after = { ...before, ...(patch && typeof patch === 'object' ? patch : {}) }
+    const changed = Object.keys(after).filter((key) => JSON.stringify(after[key]) !== JSON.stringify(before[key]))
+    if (changed.length === 0) return { jsonPath, before, after, changed: [] }
+    writeProjectJson(jsonPath, after)
+    return { jsonPath, before, after, changed }
+  }
+
   /**
    * 本项目实际生效的阶段模板（W2）。同时把「project.json 里的模板非法」这一情况带出去，
    * 让调用方（面板/PM）能提示用户，而不是让它悄悄回退默认。
@@ -614,7 +633,7 @@ export function createRegistry(ctx) {
   }
 
   return {
-    rootForWorkspace, open, ensure, listProjects, pmSession, projectJson, projectPaths,
+    rootForWorkspace, open, ensure, listProjects, pmSession, projectJson, updateProjectJson, projectPaths,
     activeStageTemplate, stageRemapPlan, applyStageRemap,
     storeLayout: (reference) => projectPaths(rootForWorkspace(reference, { allowCreate: true }).root),
     migrationStatus, migrateLegacyStore,

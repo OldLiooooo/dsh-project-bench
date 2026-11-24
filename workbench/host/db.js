@@ -263,6 +263,12 @@ export const EVENT_KIND_LABELS = {
   'artifact/add': '新增产物',
   'lease/acquire': '获取租约',
   'lease/release': '释放租约',
+  // v6.3：收工/验收的作用域判定与离场都是**事实**，必须进时间线。
+  // 为什么：被拒的收工原先在 endSession 之前就 throw，既不写 events 也不写 failure_code，
+  // 于是 lumio 真库搜 8 类作用域错误码命中 0 —— 误报几次、哪些文件触发，事后完全不可复核。
+  'scope/finish': '收工作用域判定',
+  'scope/reject': '收工被拒（作用域）',
+  'project/config': '项目配置变更',
   'import/inbox': '导入外部产物',
   'export/snapshot': '导出快照',
   'context/downgrade': '上下文降级',

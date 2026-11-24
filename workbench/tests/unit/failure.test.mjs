@@ -11,7 +11,7 @@
 // 运行：node --test --test-isolation=none workbench/tests/unit/failure.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,12 +20,15 @@ import * as store from '../../host/store.js'
 import * as docs from '../../host/docs.js'
 import * as leases from '../../host/leases.js'
 import * as exporters from '../../host/export.js'
-import { createToolDeps, registerTools } from '../../host/tools/index.js'
+import { createToolDeps, registerToolDefinitions } from '../../host/tools/index.js'
 import { spawnTaskSession, reconcileStaleSessions } from '../../host/orchestration.js'
 import { runProjectCheckers } from '../../host/checkers.js'
 import { resolveDecisionAction } from '../../host/project.js'
 import { ensureGuards } from '../../host/schema.js'
+import * as scopeApi from '../../host/scope.js'
+import * as importerApi from '../../host/import.js'
 import { validateFinish, declareSliceScope, collectWorkspaceChanges, classifyChanges, matchesPattern } from '../../host/scope.js'
+import { createProjectJson } from '../../host/project-defaults.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -63,7 +66,9 @@ function createEnv(options = {}) {
     agents: { get: () => undefined, list: options.liveAgents || (() => []) },
   }
   const deps = createToolDeps(ctx, registry, bus)
-  registerTools(ctx, registry, bus)
+  // 用 registerToolDefinitions 而不是 registerTools：后者会自己再造一份 deps，
+  // 于是测试替换 env.deps.scope 对工具无效（踩过一次）。测试要能注入，就必须共用同一份 deps。
+  registerToolDefinitions(ctx, deps)
   function dispose() {
     try { db.close() } catch (error) { /* 已关闭 */ }
     try { rmSync(root, { recursive: true, force: true }) } catch (error) { /* 尽力 */ }
@@ -611,6 +616,342 @@ test('作用域校验（真实 git diff）：跨切片改动被拒、域内改�
     assert.equal(check.crossScope[0].path, 'src/b/x.js')
     assert.equal(check.counts.inScope, 1, 'src/a/new.js 属于本切片')
     assert.ok(check.issues.some((issue) => issue.code === 'CROSS_SCOPE_CHANGES'))
+  } finally {
+    env.dispose()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 8. lumio 真库反馈（2026-11-24）：三条 P0 的回归钉子
+//
+// 这三条都不是「理论上可能」，而是真项目连续 12 天里实际付过代价的：
+//   P0-1 失败收工被片外存量拦下 -> 会话停在 active + 持租 30 分钟（诚实比撒谎贵）；
+//   P0-2 越界提示文案按 accepted 判定 -> 在 strict 下提示「declare 策略下…」，指向不存在的策略；
+//   P0-3 验收会话没有离场出口 -> 4/4 QA 会话永久 active，每个切片只能验收一次。
+// ---------------------------------------------------------------------------
+
+/** 建一个持租的任务会话（真实走 store + leases，便于断言租约状态）。 */
+function makeTaskSession(env, slice) {
+  const row = store.createSession(env.db, {
+    name: '码农-' + slice.key + '-实现', kind: 'task', role: '码农', sliceId: slice.id, dshSessionId: 'dsh-task-fail-1',
+  })
+  leases.acquireLease(env.db, { sliceId: slice.id, sessionId: row.id, reason: 'test' })
+  return { row, agent: agent('dsh-task-fail-1', env.root, 'project-task') }
+}
+
+/**
+ * 本机能不能真的跑 git 并**读回输出**？
+ * 有的沙箱允许 spawn 但不允许管道（实测：stdio:'ignore' 可以，pipe 直接 EPERM）。
+ * 作用域采集要读 stdout，所以必须按「能读到输出」来判，而不是「能 spawn」。
+ * 拿不到就如实 skip —— 把环境限制写成产品通过，是本项目最忌讳的那件事。
+ */
+function canCaptureGit() {
+  try {
+    execFileSync('git', ['--version'], { encoding: 'utf8' })
+    return true
+  } catch (error) {
+    return false
+  }
+}
+/** 真实的判定函数（测试里替换 deps.scope.validateFinish 后仍要跑它，只换掉 diff 采集）。 */
+const realValidateFinish = validateFinish
+
+/**
+ * 给 validateFinish 注入确定性 diff。
+ * 为什么要这么绕：session_finish_task 通过 deps.scope.validateFinish 调用判定层，
+ * 而 diff 采集要 spawn git —— 本会话沙箱里 spawn 是 EPERM（实测 git/node 都是）。
+ * 采集能力本身已有独立用例覆盖（'作用域校验：没有 git 与没有声明时如实标注无法校验'），
+ * 这里要验的是「判定结果如何影响收工的离场与留痕」，所以只替换采集这一层。
+ */
+function withStubbedChanges(input, changes) {
+  return { ...input, changes }
+}
+
+/**
+ * 把 deps.scope 换成一个「除 diff 采集外行为不变」的副本。
+ * 注意不能直接给模块命名空间的属性赋值（ESM namespace 是只读的，会抛 TypeError），
+ * 所以整块替换 deps.scope（deps 自己只是普通对象）。
+ */
+function stubScopeModule(env, changes) {
+  env.deps.scope = Object.freeze({
+    ...scopeApi,
+    validateFinish: (db, input) => realValidateFinish(db, withStubbedChanges(input, changes)),
+  })
+}
+
+test('P0-1 失败收工不被片外存量拦下：会话仍以 failed 结束、租约仍释放、且落 scope/finish 事件', async () => {
+  const env = createEnv()
+  try {
+    const slice = store.createSlice(env.db, { key: 'p01-failed', title: '失败也要能收工' })
+    declareSliceScope(env.db, { sliceId: slice.id, patterns: ['src/a.js'] })
+    const task = makeTaskSession(env, slice)
+    // 用显式 diff 注入取代真实 git 采集：本机沙箱 spawn git 是 EPERM，
+    // 而这条用例要验的是「判定结果如何影响收工」，不是 git 能不能跑。
+    stubScopeModule(env, {
+      basis: 'git', baseline: 'abc1234',
+      files: [
+        { path: 'src/a.js', status: 'M' },
+        { path: 'tools/policy.json', status: '??' },
+      ],
+    })
+
+    await toolOf(env, 'evidence_add').execute({ kind: 'command', resultSummary: '复跑：环境缺依赖，未跑起来' }, { agent: task.agent, signal: new AbortController().signal })
+
+    const result = await toolOf(env, 'session_finish_task').execute({
+      status: 'failed', failureCode: 'BLOCKED_DEPENDENCY',
+      handoff: '本切片被环境卡住：依赖缺失，未完成。',
+      noOutOfScopeChanges: true,
+    }, { agent: task.agent, signal: new AbortController().signal })
+    assert.equal(result.status, 'failed')
+    // ① 会话真的结束了（原实现会留 active 幽灵 + 30 分钟租约）
+    const ended = store.getSession(env.db, task.row.id)
+    assert.equal(ended.status, 'failed')
+    assert.ok(ended.endedAt, '失败收工也必须写 ended_at')
+    assert.equal(ended.failureCode, 'BLOCKED_DEPENDENCY')
+    // ② 租约释放（否则同切片 30 分钟内谁都进不来）
+    assert.equal(leases.getLease(env.db, slice.id), undefined, '失败收工后租约必须释放')
+    // ③ 片外改动仍被如实报告（「不拦截」不等于「不报告」）
+    assert.ok(result.scope.counts.outOfScope >= 1, '片外改动必须仍出现在回执里')
+    assert.equal(result.scope.blockOutOfScope, false, '失败收工的片外改动是报告项，不是门禁')
+    assert.ok(result.scope.outOfScope.includes('tools/policy.json'))
+    // ④ 留痕：放行也要有事件（原实现成功路径零事件）
+    const events = env.db.listEvents({ kinds: ['scope/finish'] })
+    assert.equal(events.length, 1)
+    assert.equal(events[0].payload.status, 'failed')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P0-1 done 收工仍被片外改动拒绝，但拒绝必留痕且会话已离场（不留 active 幽灵）', async () => {
+  const env = createEnv()
+  try {
+    const slice = store.createSlice(env.db, { key: 'p01-done', title: '成功收工仍要过门禁' })
+    declareSliceScope(env.db, { sliceId: slice.id, patterns: ['src/a.js'] })
+    const task = makeTaskSession(env, slice)
+    stubScopeModule(env, {
+      basis: 'git', baseline: 'abc1234',
+      files: [{ path: 'src/a.js', status: 'M' }, { path: 'tools/policy.json', status: '??' }],
+    })
+    await toolOf(env, 'evidence_add').execute({ kind: 'test', resultSummary: 'node --test → 全绿' }, { agent: task.agent, signal: new AbortController().signal })
+
+    const error = await expectCode(toolOf(env, 'session_finish_task').execute({
+      status: 'done', handoff: '做完了', noOutOfScopeChanges: true,
+    }, { agent: task.agent, signal: new AbortController().signal }), 'OUT_OF_SCOPE_CHANGES')
+    assert.equal(error.details.sessionEnded, true, '拒绝回执必须告诉调用方会话已结束')
+    // ① 拒绝要留痕（原实现 throw 在 endSession 之前，事件表里零命中）
+    const rejects = env.db.listEvents({ kinds: ['scope/reject'] })
+    assert.equal(rejects.length, 1)
+    assert.ok(rejects[0].payload.outOfScope.includes('tools/policy.json'))
+    // ② 拒绝后不能留 active 幽灵 + 租约
+    const after = store.getSession(env.db, task.row.id)
+    assert.equal(after.status, 'failed', '被拒的会话必须离场')
+    assert.equal(after.failureCode, 'OUT_OF_SCOPE_CHANGES')
+    assert.equal(leases.getLease(env.db, slice.id), undefined, '被拒后租约必须释放')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P0-2 越界提示文案按策略判定：strict 下不再出现「declare 策略下」这句误导文案', () => {
+  const env = createEnv()
+  try {
+    const slice = store.createSlice(env.db, { key: 'p02-msg', title: '文案按策略' })
+    declareSliceScope(env.db, { sliceId: slice.id, patterns: ['src/a.js'] })
+    const changes = { basis: 'git', baseline: 'abc1234', files: [{ path: 'src/a.js', status: 'M' }, { path: 'src/b/y.js', status: 'M' }] }
+    // 直接把归因喂给判定层不成立（validateFinish 自己采集）；这里用 classifyChanges + validateFinish 的纯逻辑部分分别验。
+    const classified = classifyChanges(env.db, changes, slice.id)
+    assert.deepEqual(classified.outOfScope.map((f) => f.path), ['src/b/y.js'])
+    // strict + accepted：文案必须指向 strict 到底该做什么，而不是指向 declare
+    // 采集不可用（非 git）时不产出 outOfScope 违规，所以这里直接断言判定层的策略分支文案。
+    const strictCheck = validateFinish(env.db, { sliceId: slice.id, root: env.root, policy: 'strict', acceptedOutOfScope: true, outOfScopeReason: 'PM 已接受' })
+    for (const issue of strictCheck.issues) {
+      assert.ok(!/declare 策略下仍不允许越界/.test(issue.message), '不得再出现旧误导文案：' + issue.message)
+    }
+    assert.equal(strictCheck.policy, 'strict')
+    // declare + accepted 也不应再拼出「declare 策略下…」这种自相矛盾的括号
+    const declareCheck = validateFinish(env.db, { sliceId: slice.id, root: env.root, policy: 'declare', acceptedOutOfScope: true, outOfScopeReason: 'PM 已接受' })
+    for (const issue of declareCheck.issues) {
+      assert.ok(!/declare 策略下仍不允许越界/.test(issue.message), 'declare 下不应出现旧文案：' + issue.message)
+    }
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P0-2 scopePolicy 有真正的写入口：默认 project.json 就带 scopePolicy，PM 可用 scope_policy 切换并留痕', async () => {
+  const env = createEnv()
+  try {
+    // ① 默认配置必须产出 scopePolicy（否则 declare 在真实项目里不可达）
+    const defaults = createProjectJson({ projectId: 'p', name: 'n' })
+    assert.equal(defaults.scopePolicy, 'strict', '默认 project.json 必须显式写 scopePolicy')
+    // ② 写入口存在且幂等
+    const jsonPath = join(env.root, 'project.json')
+    writeFileSync(jsonPath, JSON.stringify({ format: 1, projectId: 'p', name: 'n', scopePolicy: 'strict' }, null, 2))
+    env.registry.updateProjectJson = (reference, patch) => {
+      const before = JSON.parse(readFileSync(jsonPath, 'utf8'))
+      const after = { ...before, ...patch }
+      const changed = Object.keys(after).filter((k) => JSON.stringify(after[k]) !== JSON.stringify(before[k]))
+      if (changed.length > 0) writeFileSync(jsonPath, JSON.stringify(after, null, 2))
+      return { jsonPath, before, after, changed }
+    }
+    // ③ PM 调 scope_policy 切换
+    const pm = makePm(env)
+    const tool = toolOf(env, 'scope_policy')
+    const got = await tool.execute({}, { agent: pm.agent, signal: new AbortController().signal })
+    assert.equal(got.policy, 'strict')
+    await expectCode(tool.execute({ action: 'set', policy: 'declare' }, { agent: pm.agent, signal: new AbortController().signal }), 'INVALID')
+    const set = await tool.execute({ action: 'set', policy: 'declare', reason: '历史未提交改动连坐，需要 PM 显式接受' }, { agent: pm.agent, signal: new AbortController().signal })
+    assert.equal(set.policy, 'declare')
+    assert.equal(JSON.parse(readFileSync(jsonPath, 'utf8')).scopePolicy, 'declare', '必须真的写进 project.json')
+    // ④ 配置变更要有事件（谁把门放宽了？）
+    const events = env.db.listEvents({ kinds: ['project/config'] })
+    assert.equal(events.length, 1)
+    assert.equal(events[0].payload.to, 'declare')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P0-3 验收会话有离场出口：session_finish_qa 结束会话，切片可再次拉起复验', async () => {
+  const env = createEnv()
+  try {
+    const pm = makePm(env)
+    const slice = store.createSlice(env.db, { key: 'p03-qa', title: '复验' })
+    const qaRow = store.createSession(env.db, { name: '验收-' + slice.key + '-验收', kind: 'qa', role: '测试', sliceId: slice.id, dshSessionId: 'dsh-qa-p03' })
+    const qaAgent = agent('dsh-qa-p03', env.root, 'project-qa')
+    // ① QA 只结束自己，不改切片状态
+    store.updateSliceStatus(env.db, { id: slice.id, status: 'review' })
+    const result = await toolOf(env, 'session_finish_qa').execute({
+      verdict: 'rejected', summary: '复跑 99 例：第 42 例红，缺陷与复现步骤见证据',
+    }, { agent: qaAgent, signal: new AbortController().signal })
+    assert.equal(result.finished, true)
+    const ended = store.getSession(env.db, qaRow.id)
+    assert.equal(ended.status, 'failed', '不通过的验收以 failed 离场，并留失败原因')
+    assert.equal(ended.failureCode, 'QA_REJECTED')
+    assert.equal(store.getSlice(env.db, slice.id).status, 'review', '离场工具不得改切片状态')
+    // ② 位置真正释放：同切片可以再拉一个验收会话
+    const spawned = await toolOf(env, 'session_spawn_qa').execute({ sliceId: slice.id, action: '复验', prompt: '再验一次' }, { agent: pm.agent, signal: new AbortController().signal })
+    assert.equal(spawned.name, '验收-' + slice.key + '-复验')
+    // ③ 任务会话不能调它（它只给验收会话）
+    const other = store.createSession(env.db, { name: '码农-' + slice.key + '-实现', kind: 'task', role: '码农', sliceId: slice.id, dshSessionId: 'dsh-task-p03' })
+    await expectCode(toolOf(env, 'session_finish_qa').execute({ summary: 'x' }, { agent: agent('dsh-task-p03', env.root, 'project-task'), signal: new AbortController().signal }), 'PERMISSION_DENIED')
+    assert.equal(store.getSession(env.db, other.id).status, 'active', '被拒时不该结束别人的会话')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P0-3 兜底：重启对账连 qa 一起收（否则进程重启也解不开）', async () => {
+  const env = createEnv()
+  try {
+    makePm(env)
+    const slice = store.createSlice(env.db, { key: 'p03-reconcile', title: '重启对账' })
+    const qaRow = store.createSession(env.db, { name: '验收-' + slice.key + '-验收', kind: 'qa', role: '测试', sliceId: slice.id, dshSessionId: 'dsh-qa-stale' })
+    const result = reconcileStaleSessions(env.ctx, env.registry, env.deps)
+    assert.equal(result.interrupted >= 1, true, '重启对账应清扫 QA 会话')
+    const after = store.getSession(env.db, qaRow.id)
+    assert.equal(after.status, 'interrupted')
+    assert.equal(after.failureCode, 'HOST_RESTART')
+  } finally {
+    env.dispose()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 9. lumio 反馈的 P1/P2 三条（v6.4）：归因、工作树、导入
+//
+// 这三条我一开始判成「不该在本轮修」，理由是「要动表结构 / 要迁移」。
+// 复核后发现理由不成立：baseline 快照放 sessions.context_json（现成的 JSON 列，
+// spawn 时已经在写 fenceEpoch），inbox 目录用 db.file 就能算出来，都不用改 schema。
+// 所以补齐，并留下判据。
+// ---------------------------------------------------------------------------
+
+test('P1-1 归因：只算两次快照之间的改动，别人的未提交改动不连坐', (t) => {
+  // 这条用例要真 git（快照要靠 git 树对象）。沙箱里 spawn 可能是 EPERM ——
+  // 那就如实 skip，不把环境限制写成产品通过。
+  const env = createEnv()
+  try {
+    if (!canCaptureGit()) { t.skip('当前环境无法读回 git 输出（沙箱禁管道），跳过真实快照用例'); return }
+    execFileSync('git', ['init', '-q'], { cwd: env.root, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: env.root })
+    execFileSync('git', ['config', 'user.name', 'test'], { cwd: env.root })
+    writeFileSync(join(env.root, 'tracked.txt'), 'base\n')
+    execFileSync('git', ['add', '-A'], { cwd: env.root })
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: env.root })
+    // 别人的改动先于本次会话存在（模拟别的切片/PM 留下的存量）
+    writeFileSync(join(env.root, 'other.txt'), 'other slice junk\n')
+    writeFileSync(join(env.root, 'tracked.txt'), 'base\ndirty by other\n')
+
+    const baseline = scopeApi.captureWorkspaceSnapshot(env.root, { tag: 'spawn' })
+    assert.ok(baseline && baseline.allTree, '应能在 spawn 时拍下 baseline 快照')
+
+    // 本次会话真的动了两个文件
+    writeFileSync(join(env.root, 'ours.txt'), 'ours\n')
+    writeFileSync(join(env.root, 'tracked2.txt'), 'ours too\n')
+
+    const changes = scopeApi.collectSessionChanges(env.root, { baselineSnapshot: baseline })
+    assert.equal(changes.attribution, 'session', '有 baseline 时应按会话归因')
+    const paths = changes.files.map((f) => f.path).sort()
+    assert.deepEqual(paths, ['ours.txt', 'tracked2.txt'], '只应包含本次会话的改动')
+    assert.ok(!paths.includes('other.txt'), '别人的未跟踪改动不得连坐')
+    assert.ok(!paths.includes('tracked.txt'), '别人改的已跟踪文件不得连坐')
+
+    // 快照不能有副作用：工作树状态必须原样保留
+    const status = execFileSync('git', ['status', '--porcelain'], { cwd: env.root, encoding: 'utf8' })
+    assert.ok(status.includes('other.txt'), '别人的未跟踪文件仍应在（快照不清理工作树）')
+    assert.ok(status.includes('ours.txt'), '本次改动仍在')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P1-1 无 baseline 时如实降级为整树口径并标注（不假装能归因）', (t) => {
+  const env = createEnv()
+  try {
+    if (!canCaptureGit()) { t.skip('当前环境无法读回 git 输出（沙箱禁管道）'); return }
+    execFileSync('git', ['init', '-q'], { cwd: env.root, stdio: 'ignore' })
+    writeFileSync(join(env.root, 'junk.txt'), 'x\n')
+    const changes = scopeApi.collectSessionChanges(env.root, {})
+    assert.equal(changes.attribution, 'workspace', '没有 baseline 只能看整树，必须标注')
+    assert.ok(changes.files.some((f) => f.path === 'junk.txt'), '整树口径下能看到所有改动')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('P2-2 导入：store 的 inbox 与工作区 inbox 都认，且都不允许越出 inbox 目录', async () => {
+  const env = createEnv()
+  try {
+    const slice = store.createSlice(env.db, { key: 'inbox2', title: '导入' })
+    // ① store 侧 inbox（registry 建的那个）：DB 文件同级下的 inbox
+    const storeInbox = join(dirname(env.db.file), 'inbox')
+    mkdirSync(storeInbox, { recursive: true })
+    writeFileSync(join(storeInbox, 'from-store.md'), '# 外部材料\n来自 store inbox。\n', 'utf8')
+    const importer = importerApi
+    const fromStore = importer.importInboxFile(env.db, { sourcePath: 'from-store.md', type: 'report', title: 'store 导入', sliceId: slice.id, importedBy: 's1' })
+    assert.equal(fromStore.created, true)
+    assert.ok(fromStore.contentHash, '导入必须记 contentHash（来源可溯源）')
+
+    // ② 工作区侧 inbox 仍然兼容
+    const wsInbox = join(env.root, '.project', 'inbox')
+    mkdirSync(wsInbox, { recursive: true })
+    writeFileSync(join(wsInbox, 'from-ws.md'), '# 工作区材料\n\n', 'utf8')
+    const fromWs = importer.importInboxFile(env.db, { sourcePath: 'from-ws.md', type: 'report', title: '工作区导入', sliceId: slice.id, importedBy: 's1' })
+    assert.equal(fromWs.created, true)
+
+    // ③ imports 表真的有了行（原先是恒空的）
+    const rows = env.db.db.prepare('SELECT * FROM imports WHERE project_id = ?').all(env.db.projectId)
+    assert.equal(rows.length, 2)
+    assert.ok(rows.every((row) => row.content_hash))
+
+    // ④ 越界仍然拒绝：inbox 之外的文件不许导入
+    const outside = join(env.root, 'outside.md')
+    writeFileSync(outside, 'nope\n', 'utf8')
+    assert.throws(
+      () => importer.importInboxFile(env.db, { sourcePath: '../../outside.md', type: 'report', importedBy: 's1' }),
+      (error) => error.code === 'INVALID' || error.code === 'NOT_FOUND'
+    )
   } finally {
     env.dispose()
   }

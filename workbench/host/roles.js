@@ -47,7 +47,7 @@ export const FALLBACK_CARDS = {
     reads: 'L0（含进度 x/y）、project_status/brief/recall、文档/时间线/证据',
     writes: '切片/任务/会话/决策/门禁/导出；不写文档正文、不改代码',
     start: ['读 L0/L2 确认阶段、在办切片与进度', 'slice_create/task_create 拆活（acceptance 必填）', 'session_spawn_task 派任务会话（要查仓库/外部资料 → role: 调研）'],
-    finish: ['收回执（含该切片可否验收）', 'review→session_spawn_qa 独立验收；verified 终态，返工开新切片', '决策→decision_create / 门禁→gate_submit / 过→export_project'],
+    finish: ['收回执（含可否验收）；被片外改动连坐→scope_policy(set,declare) 再让任务带理由收工', 'review→session_spawn_qa 独立验收；verified 终态，返工开新切片', '决策→decision_create / 门禁→gate_submit / 过→export_project'],
     guardrails: '不代批；不写文档/代码；**不亲自调查**（没有文件工具，要查就派 role=调研）；建造者≠验收者；任务问题汇总成决策卡',
   },
   QA: {
@@ -56,7 +56,7 @@ export const FALLBACK_CARDS = {
     reads: 'L0/L2、project_brief、切片验收标准（acceptance）、实现交接与证据、代码与文档',
     writes: '只写证据（evidence_add）与验收结论（slice_verify）；不改代码、不改文档、不改测试',
     start: ['读 brief 与 acceptance，确认「验什么算过」', '看交接/证据：复跑判据，别只看别人结论'],
-    finish: ['过 → evidence_add 记复核证据，再 slice_verify(verifiedBy=你)', '不过 → 不要 slice_verify；记失败证据+复现步骤，交回 PM', '收工用 session_finish_task 写交接'],
+    finish: ['过 → evidence_add 记证据，slice_verify(verifiedBy=你)，再 session_finish_qa(verdict=passed)', '不过 → 不 slice_verify；记失败证据+复现步骤，再 session_finish_qa(verdict=rejected)', '你必须离场：不调 session_finish_qa，该切片就再也拉不起复验'],
     guardrails: '不改代码/测试/文档；验收结论必须可复现（命令+输出）',
   },
   产品: {
@@ -92,7 +92,7 @@ export const FALLBACK_CARDS = {
     reads: '2k 简报、ADR/规格、代码、project_recall',
     writes: '本切片代码/测试/脚本文件；doc_write 实现报告；除本切片外零改动',
     start: ['读 project_brief 与规格', '确认切片租约与写作用域', '列实现/测试步骤（todo_write）'],
-    finish: ['跑测试并 evidence_add（命令+结果摘要）', 'doc_write 实现报告/交接', 'session_finish_task 声明片外零改动'],
+    finish: ['跑测试并 evidence_add（命令+结果摘要）', 'doc_write 实现报告/交接', 'session_finish_task 声明片外零改动（失败收工时片外改动只报告不拦截；越界请如实报，别谎报 done）'],
     guardrails: '只改本切片文件；冻结文档不回写；问题回 PM 不直接问用户',
   },
   测试: {

@@ -21,7 +21,7 @@ stage: S4 实现
 ## 收工
 - 跑测试并 evidence_add（命令+结果摘要）
 - doc_write 实现报告/交接
-- session_finish_task 声明片外零改动
+- session_finish_task 声明片外零改动（失败收工时片外改动只报告不拦截；越界请如实报，别谎报 done）
 
 ## 红线
 只改本切片文件；冻结文档不回写；问题回 PM 不直接问用户

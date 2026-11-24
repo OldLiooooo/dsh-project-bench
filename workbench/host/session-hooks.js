@@ -155,7 +155,11 @@ function handleDisposed(ctx, registry, bus, sessionIndex, session) {
   if (db) {
     let row
     try { row = store.findSessionByDshId(db, session.id) } catch (error) { row = undefined }
-    if (row && row.kind === 'task' && row.status === 'active') {
+    // v6.3：task 之外也要结束 qa —— 验收会话原先不在任何兜底路径里，DSH 会话释放后
+    // DB 行仍是 active，重启对账（见 orchestration.reconcileStaleSessions）同样只扫 task，
+    // 于是 QA 行一旦创建就是终态 active，同切片再也拉不起验收（lumio 真库 P0-3）。
+    // qa 不持租约，所以下面按 sliceId 释放租约那段对它天然不生效。
+    if (row && (row.kind === 'task' || row.kind === 'qa') && row.status === 'active') {
       try {
         store.endSession(db, { id: row.id, status: 'interrupted' })
         if (row.sliceId) {

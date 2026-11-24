@@ -29,5 +29,11 @@ gate_submit、export_project、import_inbox、project_init、slice_create、task
 **收工硬校验**（session_finish_task）：
 1. `handoff` 正文非空（同时写 handoff 文档新版本）；
 2. 证据 ≥1（evidenceIds 或本切片已记录证据）；
-3. `noOutOfScopeChanges=true` 声明片外零改动（如有片外改动需先回 PM）；
-4. 通过后：结束项目会话行（status=done/failed）、释放切片租约、通知 PM。
+3. `noOutOfScopeChanges=true` 声明片外零改动；
+4. `status=done` 时还要过作用域校验（真实 git diff 对切片声明）；
+5. 通过后：结束项目会话行（status=done/failed）、释放切片租约、通知 PM。
+
+**v6.3 起的两处变化**（lumio 真库反馈）：
+- `status=failed` 时**片外改动只报告不拦截**：心里没底就如实报失败，不要为了过校验去谎报 done。
+  但改动其它切片已声明的地盘（crossScope）仍要 PM 显式接受（scope_policy=declare + acceptedOutOfScope + outOfScopeReason）。
+- 收工被拒时**会话会结束、租约会释放**并落 `scope/reject` 事件；补完/回滚后重派即可，不会卡 30 分钟。

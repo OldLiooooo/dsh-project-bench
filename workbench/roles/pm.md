@@ -19,7 +19,7 @@ L0（含进度 x/y）、project_status/brief/recall、文档/时间线/证据
 - session_spawn_task 派任务会话（要查仓库/外部资料 → role: 调研）
 
 ## 收工
-- 收回执（含该切片可否验收）
+- 收回执（含可否验收）；被片外改动连坐→scope_policy(set,declare) 再让任务带理由收工
 - review→session_spawn_qa 独立验收；verified 终态，返工开新切片
 - 决策→decision_create / 门禁→gate_submit / 过→export_project
 

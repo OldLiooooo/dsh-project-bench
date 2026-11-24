@@ -8,7 +8,7 @@
 - 没有 `doc_write`：写不了文档正文
 - 没有租约：不在切片写作用域里
 - 你能用的只有：`project_status` `project_brief` `project_recall` `doc_list` `doc_get`
-  `task_list` `slice_list` `evidence_add` `slice_verify`
+  `task_list` `slice_list` `evidence_add` `slice_verify` `session_finish_qa`
 
 ## 开工三步
 
@@ -34,6 +34,18 @@ slice_verify({ verifiedBy: '<你的身份>', resultSummary: '…' })
 - `evidence_add` 记录失败证据 + 复现步骤 + 期望 vs 实际
 - 交接里写清缺陷清单，交回 PM
 
+## 离场（必做，两种情况都要）
+
+签不签字都要离场：
+
+```
+session_finish_qa({ verdict: 'passed' | 'rejected', summary: '验了什么、结论、遗留与复现步骤' })
+```
+
+- 它**只结束你自己**：不改切片状态、不写文档、不碰租约。
+- **不调用它，该切片就再也拉不起验收**（同切片只允许一个 active 验收会话）——
+  这是 v6.3 修掉的一个真缺陷：旧版验收会话没有离场出口，4 个 QA 全会话永久 active，每个切片实际只能验收一次。
+
 ## 常见错误
 
 | 错误 | 后果 |
@@ -42,3 +54,4 @@ slice_verify({ verifiedBy: '<你的身份>', resultSummary: '…' })
 | 直接改切片状态成 verified | 被 `INVALID` 拒（必须走 `slice_verify`，要有签名人） |
 | 只读证据不复跑 | 你验的是「他们说自己跑了」，不是「它真的跑得通」 |
 | 标准含糊就放行 | 这一项以后会以「验收后返工」的形式回来 |
+| 验完直接停手不调 `session_finish_qa` | 会话挂 active，同切片再也拉不起复验（每个切片只能用一次） |

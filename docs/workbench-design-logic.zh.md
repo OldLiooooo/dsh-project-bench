@@ -17,7 +17,7 @@
 
 | 标记 | 含义 | 例子 |
 |---|---|---|
-| 🟦 **【插件】** | 插件**自身的代码/机制**，装了插件就有 | 31 个工具、24 张表（23 普通 + 1 FTS5 虚拟）、13 个触发器、11 个 UI 槽位 |
+| 🟦 **【插件】** | 插件**自身的代码/机制**，装了插件就有 | 33 个工具、24 张表（23 普通 + 1 FTS5 虚拟）、13 个触发器、11 个 UI 槽位 |
 | 🟩 **【产出】** | 插件**在运行时生成的数据/文件**，属于你的项目 | `project.db` 里的切片/决策、`docs/product/prd-*.md`、`timeline.md` |
 
 **一句话区分**：🟦 是「软件」，🟩 是「软件产生的资料」。
@@ -247,8 +247,30 @@ spawn 时把当次 epoch 写进 `sessions.context.fenceEpoch`，写路径比对�
 | `verifiable=false, ok=true` | 无 git 或未声明作用域 → **如实标注无法校验**，不伪造通过 |
 | `ok=false` | `CROSS_SCOPE_CHANGES`（改了别人的已声明地盘）或 `OUT_OF_SCOPE_CHANGES` |
 
-> `crossScope` 在任何策略下都拒绝：那不是「本切片没声明清楚」，而是侵犯了别人**已声明**的范围。
+> `crossScope` 默认拒绝：那不是「本切片没声明清楚」，而是侵犯了别人**已声明**的范围。
+> 但它可以被**显式接受**（`acceptCrossScope` + 非 strict 策略 + 必须给 `outOfScopeReason`）——
+> 否则「同事没提交的存量」会让所有切片互相锁死。
 > 配套工具 `slice_scope`（list/declare/clear）——没有声明入口，可判定性永远不成立。
+
+**v6.4：归因口径（改判定模型，不改规则）**
+
+v4 的实现拿「整个脏工作树 vs 本切片声明」比，于是**别人的未提交改动**会把本次收工连坐判成越界
+（真库实测 19 个文件里 16 个与本次交付无关）。根因不是规则写错，是**归因对象错了**：
+它问的是「工作树有多脏」，而不是「这次会话动了什么」。
+
+| 口径 | `attribution` | 怎么来的 | 能回答什么 |
+|---|---|---|---|
+| 会话级 | `session` | spawn 时拍工作树快照（git 树对象），收工再拍一次，两次之间新增的路径才算 | 这次会话动了什么 |
+| 整树 | `workspace` | 没有 baseline 快照的老会话 / 非 git 降级 | 工作树现在有多脏 |
+| 未知 | `unavailable` | 采集失败（无 git / 沙箱禁 spawn） | 什么也答不了（必须如实标注） |
+
+三个约束保证拍快照没有副作用：
+1. 已跟踪改动用 `git stash create` 收录 —— 只写对象库，**不改工作树、不动 HEAD**；
+2. 未跟踪文件用临时 `GIT_INDEX_FILE` + `git add -A` 写成临时树 —— **不碰真索引**；
+3. 临时索引用完即删，工作树的 `git status` 原样保留。
+
+同时修掉了 P1-2：判定改为在**会话自己的 cwd**（worktree）里做，不再固定读主工作树 ——
+「工作树里干活干净却被主树存量拒绝」不再成立。
 
 ---
 
@@ -433,9 +455,9 @@ stages     pending / active / done / retired
    用户 ⇄ PM 会话（preset: project-office）
           任务会话（preset: project-task，命名 角色-切片-动作）
 
-🟦 能力层：31 个工具
+🟦 能力层：33 个工具
    PM 独有 15 │ 双端共享 13 │ 任务独有 3 │ 验收(qa) 独有 0
-   → PM 可见 27，任务可见 15，验收可见 9，调研（只读角色）同任务面，普通会话/子 agent 可见 0
+   → PM 可见 28，任务可见 15，验收可见 10，调研（只读角色）同任务面，普通会话/子 agent 可见 0
 
 🟦 领域层
    store / docs / leases / export / import
@@ -453,16 +475,16 @@ stages     pending / active / done / retired
 
 ### 4.1 工具分配（v1.0 写的「22 + 15 = 37」是误导）
 
-**v6 总数 31**（v4 为 27，v5 加 3，v6 加 1 `file_index`）：
+**v6.4 总数 33**（v4 为 27，v5 加 3，v6 加 1 `file_index`，v6.3 加 2 `scope_policy` / `session_finish_qa`；v6.4 只改 import_inbox 的归属，不改数量）：
 
 | 类别 | 数量 | 举例 |
 |---|---|---|
-| PM 独有 | 15 | `gate_submit` `session_spawn_task` `slice_create` `decision_create` `project_init` `slice_scope`(v4) `session_spawn_qa`(v5) `period_roll`(v5) `file_index` |
-| 双端共享 | 13 | `project_status` `doc_get` `slice_update` `artifact_add` `doc_freeze` `slice_verify`(pm+qa) `evidence_add`(task+qa) |
-| 验收独有 | 0 | `slice_verify` 是 pm+qa 共享（**任务会话不能调**） |
+| PM 独有 | 16 | `gate_submit` `session_spawn_task` `slice_create` `decision_create` `project_init` `slice_scope`(v4) `session_spawn_qa`(v5) `period_roll`(v5) `file_index` `scope_policy`(v6.3) |
+| 双端/多端共享 | 14 | `project_status` `doc_get` `slice_update` `artifact_add` `doc_freeze` `slice_verify`(pm+qa) `evidence_add`(task+qa) `import_inbox`(pm+task，v6.4) |
+| 验收独有 | 1 | `session_finish_qa`(v6.3)：**只结束自己**，不改切片状态（P0-3） |
 | 任务独有 | 3 | `doc_write` `session_finish_task` `session_task_report` |
 
-> **PM 可见 27，任务可见 15，验收（qa）可见 9**。v1.0 的「22 + 15 = 37 ≠ 26」是因为共享的工具被算了两遍。
+> **PM 可见 28，任务可见 16，验收（qa）可见 10**。v1.0 的「22 + 15 = 37 ≠ 26」是因为共享的工具被算了两遍。
 >
 > v5 三个新工具的共同点：**它们都是「不能顺手做」的动作**，所以从状态更新里拆出来单独成工具 ——
 > 验收要有签名人与建造者校验（`slice_verify`）、拉起验收会话不占租约（`session_spawn_qa`）、
@@ -526,9 +548,9 @@ tools/*       → store, docs, leases, export, import, project, checkers, indexe
 |---|---|
 | 不写文件 | preset 里 `tool-fs` 的 write/edit/applyPatch 全 false |
 | 不占租约 | 会话 `kind='qa'`，不进 task 的租约路径；`evidence_add` 对它跳过 `assertWriteScope` |
-| 只能记证据 + 签字 | 工具 actors 里只有 `evidence_add` 与 `slice_verify` 允许 `qa` |
+| 只能记证据 + 签字 + 离场 | 工具 actors 里只有 `evidence_add`、`slice_verify`、`session_finish_qa` 允许 `qa`；后者只结束自己（v6.3，P0-3） |
 
-验收会话可见 9 个工具（7 读 + `evidence_add` + `slice_verify`），
+验收会话可见 10 个工具（7 读 + `evidence_add` + `slice_verify` + `session_finish_qa`），
 **看不到** `doc_write` / `doc_freeze` / `session_finish_task`。
 
 ### 4.5.4 进度投影
@@ -867,7 +889,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 判据隔离不是安全边界 | 恶意判据仍可读宿主文件（同进程空间，`spawn` EPERM 使进程级隔离不可用） | 中（已在 ADR 明写） |
 | 多人身份不能**强制**分离 | 能追责、不能阻止同人既提又批；无 RBAC | 中 |
-| 69 个空 catch 仍在（共 189 个 catch，2026-11-24 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| 79 个空 catch 仍在（共 207 个 catch，2026-11-24 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
 | ~~`period` 元数据从未写入~~ | **v5 已修**：`period_roll` 显式推进并写 meta + `period/roll` 事件；不做日历自动滚动（跨零点归属会变成猜） | — |
 | ~~无周报生成~~ | **v5 已修**：`weekly_report` 从项目库自动渲染（进度/待决策/阻塞/本期完成），确定性可重复，可直接贴 GitHub Issue | — |
 | ~~`deliverableTypes` 只写不读~~ | **v5 已修**：`doc_write` 新建文档时按阶段校验（`STAGE_DELIVERABLE_NOT_ALLOWED`）；只拦新建不拦追加 | — |
@@ -924,7 +946,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|
 | `project.db` | 24 张表的全部数据（切片/任务/会话/文档/决策/证据/事件） |
 | `project.json` | 项目元信息 + 阶段模板 + checkers 配置 |
-| `inbox/` | 待导入的外部文件 |
+| `inbox/` | 待导入的外部文件（v6.4 起 `import_inbox` **优先读这里**；工作区 `.project/inbox` 作为历史兼容保留） |
 | `packages/` | 外部工作包 |
 
 **在工作区（`<你的仓库>/`）**
