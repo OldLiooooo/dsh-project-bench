@@ -729,6 +729,26 @@ WIP 只提示不强制（设计提到「进行中 ≤ 团队规模」，但团�
 | `session_spawn_task` 接替 | `host/orchestration.js` | 同(切片,角色) 的 active 会话若判定为不可投递 → 标 `interrupted`（`SUPERSEDED_UNREACHABLE`）+ 释放其租约，再建新会话；返回值带 `superseded` 让 PM 知道发生了什么 |
 | 工具层唯一性例外 | `host/tools/pm-tools.js` | 只有「**全部**旧会话都不可投递」才放行接替 |
 
+**v6.5：重启对账的时机缺陷（静默空转）**
+
+`reconcileStaleSessions` 原先在 `apply()` 里同步调用。但 `apply()` 执行那一刻 `workspaceRegistry`
+尚未就绪，`registry.listProjects()` 返回 `[]`，对账循环一次都不进 —— **它静默空转过，而且不报错**。
+
+实测代价（lumio 真库）：重启后 5 条 `kind='qa'` 的 active 会话原样还在；
+全库 4 条 `interrupted` 的 `failureCode` 都是 `INTERRUPTED`（`session/disposed` 写的），
+**没有一条 `HOST_RESTART`** —— 这条对账在真机上从未成功跑过一次。
+
+现在三个触发点，谁先就绪谁跑，且幂等：
+
+| 触发点 | 位置 | 覆盖场景 |
+|---|---|---|
+| `apply()` 首次尝试 | `host/session-hooks.js` | headless/CLI（没有 workspaceRegistry，走 `.project` 回退） |
+| `workspaceRegistry` 注入就绪 | `index.js` 的 `ctx.inject` 回调 | **GUI profile 真正生效的就是这条** |
+| 首次调用项目工具 | `host/tools/register.js` 的 `onFirstUse` | 兜住「就绪回调比服务可查更早」的极端顺序 |
+
+**空转不再安静**：`listProjects()` 返回 0 个项目时 `warn` 出来。这条比修复本身还重要 ——
+一个不报错、也不干活的初始化步骤，比一个报错的更容易被当成已完成。
+
 **关键取舍：判定不出来时绝不误杀。**
 `listChildren` 不可用（老版本/服务缺失/调用抛错）→ 返回 `undefined`，调用方保留原语义
 （照旧报 `DUPLICATE_ACTIVE_SESSION`）。宁可让 PM 看到一次明确的冲突，也不要把「探测不到」当成「已经死了」——
@@ -889,7 +909,7 @@ CHECKER_ISOLATION_REQUIRED 项目要求隔离执行，但判据配置为 in-proc
 |---|---|---|
 | 判据隔离不是安全边界 | 恶意判据仍可读宿主文件（同进程空间，`spawn` EPERM 使进程级隔离不可用） | 中（已在 ADR 明写） |
 | 多人身份不能**强制**分离 | 能追责、不能阻止同人既提又批；无 RBAC | 中 |
-| 79 个空 catch 仍在（共 207 个 catch，2026-11-24 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
+| 81 个空 catch 仍在（共 210 个 catch，2026-11-24 复核） | 多数是「失败不影响主流程」的降级路径，但审计噪音仍在 | 中 |
 | ~~`period` 元数据从未写入~~ | **v5 已修**：`period_roll` 显式推进并写 meta + `period/roll` 事件；不做日历自动滚动（跨零点归属会变成猜） | — |
 | ~~无周报生成~~ | **v5 已修**：`weekly_report` 从项目库自动渲染（进度/待决策/阻塞/本期完成），确定性可重复，可直接贴 GitHub Issue | — |
 | ~~`deliverableTypes` 只写不读~~ | **v5 已修**：`doc_write` 新建文档时按阶段校验（`STAGE_DELIVERABLE_NOT_ALLOWED`）；只拦新建不拦追加 | — |

@@ -30,9 +30,9 @@ export function createToolDeps(ctx, registry, bus) {
   }
 }
 
-/** 插件入口（index.js 调用）：注册全部项目工具。 */
-export function registerTools(ctx, registry, bus) {
-  return registerToolDefinitions(ctx, createToolDeps(ctx, registry, bus))
+/** 插件入口（index.js 调用）：注册全部项目工具。options 透传给 registerToolDefinitions（onFirstUse 等）。 */
+export function registerTools(ctx, registry, bus, options = {}) {
+  return registerToolDefinitions(ctx, createToolDeps(ctx, registry, bus), options)
 }
 
 export { createToolSpecs, toolCatalog, registerToolDefinitions }

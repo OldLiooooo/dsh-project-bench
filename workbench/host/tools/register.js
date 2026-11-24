@@ -73,10 +73,17 @@ function actorAllowed(spec, actor) {
  * @param {object} deps {ctx, registry, bus, store, docs, leases, exporter, importer, project, projectDefaults}
  * @returns {{name:string, dispose:Function}[]}
  */
-export function registerToolDefinitions(ctx, deps) {
+export function registerToolDefinitions(ctx, deps, options = {}) {
   if (!ctx || !ctx.tools || typeof ctx.tools.register !== 'function') {
     throw new Error('project-workbench: ctx.tools 不可用，无法注册项目工具')
   }
+  // 「首次真正用到项目工具时补跑一次重启对账」（v6.5）。
+  //
+  // 为什么需要第三个触发点：apply() 太早（registry 未就绪），就绪回调理论上够用，
+  // 但服务注册顺序不是我们能假定的 —— 如果 inject 回调比 workspaceRegistry 真正可查更早，
+  // 对账依然空转。第一次有人**真的调项目工具**时，服务必然已经可用，这时补跑最可靠。
+  // 只跑一次：跑过就置位，之后每个工具调用不再付这个开销。
+  let reconcilePending = typeof options.onFirstUse === 'function'
   const specs = createToolSpecs(ctx, deps)
   const registered = []
   for (const spec of specs) {
@@ -86,6 +93,10 @@ export function registerToolDefinitions(ctx, deps) {
       parameters: spec.parameters,
       output: OBJECT_OUTPUT,
       execute: async function (args, exec) {
+        if (reconcilePending) {
+          reconcilePending = false
+          try { options.onFirstUse() } catch (error) { /* 对账失败不能拦住工具调用 */ }
+        }
         const actor = resolveActor(deps, exec && exec.agent)
         if (!isProjectActor(actor)) {
           throw fail('NOT_PROJECT_SESSION', '当前会话不是项目会话（PM/任务会话）或项目尚未初始化；项目工具不可用。')

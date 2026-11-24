@@ -21,6 +21,7 @@ import * as docs from '../../host/docs.js'
 import * as leases from '../../host/leases.js'
 import * as exporters from '../../host/export.js'
 import { createToolDeps, registerToolDefinitions } from '../../host/tools/index.js'
+import { reconcileOnReady } from '../../host/session-hooks.js'
 import { spawnTaskSession, reconcileStaleSessions } from '../../host/orchestration.js'
 import { runProjectCheckers } from '../../host/checkers.js'
 import { resolveDecisionAction } from '../../host/project.js'
@@ -952,6 +953,96 @@ test('P2-2 导入：store 的 inbox 与工作区 inbox 都认，且都不允许�
       () => importer.importInboxFile(env.db, { sourcePath: '../../outside.md', type: 'report', importedBy: 's1' }),
       (error) => error.code === 'INVALID' || error.code === 'NOT_FOUND'
     )
+  } finally {
+    env.dispose()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 10. 重启对账的时机缺陷（v6.5）
+//
+// 这是我在「改完重启验证」时发现的：5 条 qa 会话重启后原样还在。
+// 根因不是对账逻辑错（真实库副本上跑，5 条全清），而是它**根本没被调用**：
+// apply() 是同步的，那一刻 workspaceRegistry 还没就绪，
+// registry.listProjects() 返回 []，循环一次都不进 —— 静默空转。
+// 全库 4 条 interrupted 的 failureCode 都是 INTERRUPTED，没有一条 HOST_RESTART，
+// 说明这条对账在真机上从来没有成功跑过一次。
+// ---------------------------------------------------------------------------
+
+test('v6.5 对账空转必须能被看见：registry 未就绪时 warn 出来，而不是安静地什么都不做', () => {
+  const env = createEnv()
+  try {
+    const warnings = []
+    const ctx = {
+      ...env.ctx,
+      logger: { info: () => {}, warn: (message) => warnings.push(String(message)) },
+    }
+    // registry 还没就绪：listProjects() 返回空。这正是 apply() 时刻的真实情形。
+    const emptyRegistry = { ...env.registry, listProjects: () => [] }
+    const result = reconcileOnReady(ctx, emptyRegistry, env.deps, env.bus, { tag: 'apply' })
+    assert.equal(result.projects, 0)
+    assert.equal(result.interrupted, 0)
+    assert.ok(
+      warnings.some((line) => line.includes('空转')),
+      '对账空转必须 warn（否则下次还是没人知道它没跑）：' + JSON.stringify(warnings)
+    )
+  } finally {
+    env.dispose()
+  }
+})
+
+test('v6.5 对账在 registry 就绪后真的清掉 qa 幽灵（同一份 DB：先空转，后就绪）', () => {
+  const env = createEnv()
+  try {
+    makePm(env)
+    const slice = store.createSlice(env.db, { key: 'v65-reconcile', title: '时机' })
+    const qaRow = store.createSession(env.db, {
+      name: '验收-' + slice.key + '-验收', kind: 'qa', role: '测试', sliceId: slice.id, dshSessionId: 'dsh-qa-v65',
+    })
+    const quietCtx = { ...env.ctx, logger: { info: () => {}, warn: () => {} } }
+
+    // ① 就绪前：空转，qa 还是 active（复现线上现象）
+    const before = reconcileOnReady(quietCtx, { ...env.registry, listProjects: () => [] }, env.deps, env.bus, { tag: 'apply' })
+    assert.equal(before.projects, 0)
+    assert.equal(store.getSession(env.db, qaRow.id).status, 'active', '空转时不该动任何会话')
+
+    // ② 就绪后：同一次调用真的清掉
+    const after = reconcileOnReady(quietCtx, env.registry, env.deps, env.bus, { tag: 'ready' })
+    assert.equal(after.interrupted >= 1, true, '就绪后应清扫 qa 会话')
+    const row = store.getSession(env.db, qaRow.id)
+    assert.equal(row.status, 'interrupted')
+    assert.equal(row.failureCode, 'HOST_RESTART', '必须留 HOST_RESTART（这条以前从未在真机出现过）')
+  } finally {
+    env.dispose()
+  }
+})
+
+test('v6.5 首次调用项目工具会补跑一次对账，且只跑一次', async () => {
+  const env = createEnv()
+  try {
+    makePm(env)
+    const slice = store.createSlice(env.db, { key: 'v65-firstuse', title: '首用补跑' })
+    const qaRow = store.createSession(env.db, {
+      name: '验收-' + slice.key + '-验收', kind: 'qa', role: '测试', sliceId: slice.id, dshSessionId: 'dsh-qa-first',
+    })
+    let calls = 0
+    // 单独注册一套工具，带上 onFirstUse（复用同一份 deps，避免又造一份）。
+    // 注意：createEnv 已经注册过一套**没有** onFirstUse 的，toolOf 取第一个匹配项；
+    // 所以先清空注册表再注册，测的才是带 onFirstUse 的那一套。
+    env.registrations.length = 0
+    const ctx = {
+      ...env.ctx,
+      tools: { register: (definition, opts) => { env.registrations.push({ definition, options: opts }); return () => {} } },
+    }
+    registerToolDefinitions(ctx, env.deps, { onFirstUse: () => { calls += 1 } })
+    assert.equal(calls, 0, '注册本身不该触发对账')
+
+    const pmAgent = agent('dsh-pm-fail', env.root, 'project-office')
+    await toolOf(env, 'project_status').execute({}, { agent: pmAgent, signal: new AbortController().signal })
+    assert.equal(calls, 1, '第一次工具调用应补跑一次对账')
+    await toolOf(env, 'project_status').execute({}, { agent: pmAgent, signal: new AbortController().signal })
+    assert.equal(calls, 1, '只跑一次，之后不再付这个开销')
+    void qaRow
   } finally {
     env.dispose()
   }

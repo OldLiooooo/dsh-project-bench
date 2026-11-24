@@ -180,7 +180,50 @@ function handleDisposed(ctx, registry, bus, sessionIndex, session) {
 }
 
 /**
- * 注册全部会话钩子，并在插件 apply 时做一次重启对账。
+ * 重启/插件重载对账（v6.5）。
+ *
+ * 为什么从 apply() 里搬出来：apply() 是同步执行的，那一刻 workspaceRegistry 尚未就绪，
+ * 于是 registry.listProjects() 返回 []，对账循环一次都不进 —— 它是**静默空转**，
+ * 既不清会话也不报错。实测证据（lumio 真库）：库里 5 条 kind='qa' 的 active 会话，
+ * 重启后原样还在；全部 4 条 interrupted 记录的 failureCode 都是 INTERRUPTED
+ * （session/disposed 那条路径写的），**没有任何一条是 HOST_RESTART** ——
+ * 也就是说这条对账从未在这台机器上成功跑过一次。
+ *
+ * 现在的做法：三个触发点，谁先就绪谁跑，且**幂等**（重复跑不会误伤，见 reconcileStaleSessions
+ * 里的 live-agent 判定）：
+ *   1. apply 时先跑一次 —— headless/CLI profile 没有 workspaceRegistry，靠这一条；
+ *   2. workspaceRegistry 注入就绪后再跑一次 —— GUI profile 真正生效的就是这一条；
+ *   3. 首次真正用到项目工具时补跑一次 —— 兜住「就绪回调比服务可用更早」的极端顺序。
+ * 空转时不许安静：listProjects() 为空也要 warn 出来，否则下次还是没人知道它没跑。
+ */
+export function reconcileOnReady(ctx, registry, deps, bus, options = {}) {
+  const tag = options.tag || 'startup'
+  let result = { projects: 0, checked: 0, interrupted: 0, leasesReleased: 0 }
+  try {
+    result = reconcileStaleSessions(ctx, registry, deps)
+  } catch (error) {
+    warn(ctx, '重启对账失败（' + tag + '）：' + String(error && error.message ? error.message : error))
+    return result
+  }
+  if (result.projects === 0) {
+    // 没有项目 = registry 还没就绪（或确实没有项目）。区别对待：前者要能被看见。
+    warn(ctx, '重启对账空转（' + tag + '）：registry.listProjects() 返回 0 个项目，本次没有对账任何会话')
+  }
+  if (result.interrupted > 0) {
+    let projects = []
+    try { projects = registry.listProjects() } catch (error) { projects = [] }
+    for (const item of projects) {
+      if (!item || !item.exists) continue
+      try {
+        const db = registry.open(item.workspaceId !== undefined ? item.workspaceId : item.root)
+        if (db) emitChange(bus, db, item.root)
+      } catch (error) { /* 单个项目失败忽略 */ }
+    }
+  }
+  return result
+}
+/**
+ * 注册全部会话钩子。重启对账只是**尝试**一次（真正生效见 reconcileOnReady）。
  * @returns {{projects:number, checked:number, interrupted:number, leasesReleased:number}}
  */
 export function registerSessionHooks(ctx, registry, bus) {
@@ -237,22 +280,9 @@ export function registerSessionHooks(ctx, registry, bus) {
   })
 
   // 重启/插件重载对账：没有 live agent 的 active 任务会话标 interrupted。
-  let reconcile = { projects: 0, checked: 0, interrupted: 0, leasesReleased: 0 }
-  try {
-    reconcile = reconcileStaleSessions(ctx, registry, deps)
-    if (reconcile.interrupted > 0) {
-      let projects = []
-      try { projects = registry.listProjects() } catch (error) { projects = [] }
-      for (const item of projects) {
-        if (!item || !item.exists) continue
-        try {
-          const db = registry.open(item.workspaceId !== undefined ? item.workspaceId : item.root)
-          if (db) emitChange(bus, db, item.root)
-        } catch (error) { /* 单个项目失败忽略 */ }
-      }
-    }
-  } catch (error) {
-    warn(ctx, '重启对账失败：' + String(error && error.message ? error.message : error))
-  }
-  return reconcile
+  // 这里只是**第一次**尝试——此刻 registry 很可能还没就绪（见 reconcileOnReady 的说明）。
+  // 真正的生效点在 index.js 的 workspaceRegistry 注入回调与首次工具调用。
+  const reconcile = reconcileOnReady(ctx, registry, deps, bus, { tag: 'apply' })
+  // 把对账能力交给调用方（index.js），供就绪回调/首用补跑。
+  return Object.assign(reconcile, { reconcile: () => reconcileOnReady(ctx, registry, deps, bus, { tag: 'ready' }) })
 }

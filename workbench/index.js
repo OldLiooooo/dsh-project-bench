@@ -24,10 +24,18 @@ export function apply(ctx) {
   const bus = createBus()
   const registry = createRegistry(ctx)
   ctx.effect(() => () => { bus.close(); registry.closeAll() }, 'workbench: dispose runtime')
-  registerSessionHooks(ctx, registry, bus)
+  // 返回值带一个 reconcile()：apply 这一刻 registry 多半还没就绪（见 session-hooks.js 的说明），
+  // 真正的对账要在 workspaceRegistry 注入后补跑一次，否则重启清不掉 active 幽灵。
+  const sessionHooks = registerSessionHooks(ctx, registry, bus)
   registerPrompts(ctx, registry, bus)
   registerSkills(ctx, registry)
-  registerTools(ctx, registry, bus)
+  // 第三个触发点：第一次真的调用项目工具时补跑对账（见 register.js 的 onFirstUse 说明）。
+  // 幂等且只跑一次；失败只记警告，不拦工具调用。
+  registerTools(ctx, registry, bus, {
+    onFirstUse: function () {
+      if (typeof sessionHooks.reconcile === 'function') sessionHooks.reconcile()
+    },
+  })
   registerActionCards(ctx, registry, bus)
 
   const state = { panel: false, workspaceRegistry: false }
@@ -45,6 +53,14 @@ export function apply(ctx) {
     ctx.inject(['workspaceRegistry'], function (guiCtx) {
       state.workspaceRegistry = true
       try { guiCtx.logger?.debug?.('project-workbench: workspace registry available') } catch (logError) { /* logger 不可用 */ }
+      // v6.5：这才是重启对账**真正生效**的地方 —— apply() 那一刻这个服务还没就绪，
+      // 那时跑对账是静默空转（listProjects() 返回 []，一条会话都不处理，也不报错）。
+      // 实测代价：lumio 真库里 5 条 qa 会话重启后原样留着，且全库没有一条 HOST_RESTART 记录。
+      try {
+        if (sessionHooks && typeof sessionHooks.reconcile === 'function') sessionHooks.reconcile()
+      } catch (error) {
+        try { ctx.logger.warn('project-workbench: 就绪后对账失败：' + String((error && error.message) || error)) } catch (logError) { /* logger 不可用 */ }
+      }
     })
     ctx.effect(() => () => { state.panel = false }, 'workbench: panel channel lifecycle')
   }
